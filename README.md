@@ -4,6 +4,8 @@
 
 A TUI multi-process launcher for your dev environment — manage all your local servers and commands from a single terminal.
 
+**English** | [日本語](README.ja.md)
+
 ```
 ┌─ lnch: my-project ─────────────────────────────────────────────────┐
 │                                                                     │
