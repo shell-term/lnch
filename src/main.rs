@@ -6,6 +6,8 @@ mod message;
 mod process;
 mod tui;
 
+use std::sync::Mutex;
+
 use clap::Parser;
 use tokio::sync::mpsc;
 
@@ -20,9 +22,21 @@ use crate::tui::app::App;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_writer(std::io::sink)
-        .init();
+    let log_dir = std::env::temp_dir();
+    let log_file = std::fs::File::create(log_dir.join("lnch.log")).ok();
+    match log_file {
+        Some(file) => {
+            tracing_subscriber::fmt()
+                .with_writer(Mutex::new(file))
+                .with_ansi(false)
+                .init();
+        }
+        None => {
+            tracing_subscriber::fmt()
+                .with_writer(std::io::sink)
+                .init();
+        }
+    }
 
     let cli = Cli::parse();
 

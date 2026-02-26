@@ -1,0 +1,12 @@
+name: example-project
+tasks:
+  - name: server
+    command: "python3 server.py"
+    working_dir: "."
+    color: green
+    env:
+      PORT: "18080"
+  - name: worker
+    command: "python3 worker.py"
+    working_dir: "."
+    color: blue

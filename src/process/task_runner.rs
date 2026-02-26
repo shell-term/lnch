@@ -181,7 +181,17 @@ impl TaskRunner {
 
         let handle = tokio::spawn(async move {
             let status = child.wait().await;
-            let exit_code = status.ok().and_then(|s| s.code());
+
+            let exit_code = match &status {
+                Ok(s) => {
+                    tracing::info!(task = %name, status = ?s, "Process exited normally");
+                    s.code()
+                }
+                Err(e) => {
+                    tracing::error!(task = %name, error = %e, "Process wait failed");
+                    None
+                }
+            };
 
             let task_status = match exit_code {
                 Some(0) => TaskStatus::Stopped,
