@@ -78,7 +78,6 @@ impl TaskRunner {
         }
     }
 
-    #[allow(unused_variables)]
     pub async fn stop(&mut self) -> anyhow::Result<()> {
         let pid = match self.pid {
             Some(pid) => pid,
@@ -88,20 +87,7 @@ impl TaskRunner {
         self.send_status(TaskStatus::Stopping).await;
 
         if self.is_running() {
-            #[cfg(unix)]
-            {
-                let _ = nix::sys::signal::killpg(
-                    nix::unistd::Pid::from_raw(pid as i32),
-                    nix::sys::signal::Signal::SIGTERM,
-                );
-            }
-
-            #[cfg(windows)]
-            {
-                if let Some(handle) = self.exit_monitor.take() {
-                    handle.abort();
-                }
-            }
+            Self::graceful_terminate(pid);
 
             let exited = match self.exit_monitor.as_mut() {
                 Some(handle) => {
@@ -114,13 +100,7 @@ impl TaskRunner {
 
             if !exited {
                 tracing::warn!(task = %self.config.name, "Graceful shutdown timed out, force killing");
-                #[cfg(unix)]
-                {
-                    let _ = nix::sys::signal::killpg(
-                        nix::unistd::Pid::from_raw(pid as i32),
-                        nix::sys::signal::Signal::SIGKILL,
-                    );
-                }
+                Self::force_kill(pid);
                 if let Some(handle) = self.exit_monitor.take() {
                     handle.abort();
                 }
@@ -133,6 +113,42 @@ impl TaskRunner {
         self.send_status(TaskStatus::Stopped).await;
         tracing::info!(task = %self.config.name, "Task stopped");
         Ok(())
+    }
+
+    fn graceful_terminate(pid: u32) {
+        #[cfg(unix)]
+        {
+            let _ = nix::sys::signal::killpg(
+                nix::unistd::Pid::from_raw(pid as i32),
+                nix::sys::signal::Signal::SIGTERM,
+            );
+        }
+        #[cfg(windows)]
+        {
+            let _ = std::process::Command::new("taskkill")
+                .args(["/T", "/PID", &pid.to_string()])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        }
+    }
+
+    fn force_kill(pid: u32) {
+        #[cfg(unix)]
+        {
+            let _ = nix::sys::signal::killpg(
+                nix::unistd::Pid::from_raw(pid as i32),
+                nix::sys::signal::Signal::SIGKILL,
+            );
+        }
+        #[cfg(windows)]
+        {
+            let _ = std::process::Command::new("taskkill")
+                .args(["/F", "/T", "/PID", &pid.to_string()])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        }
     }
 
     #[allow(dead_code)]
@@ -256,12 +272,8 @@ impl TaskRunner {
 
 impl Drop for TaskRunner {
     fn drop(&mut self) {
-        #[cfg(unix)]
         if let Some(pid) = self.pid {
-            let _ = nix::sys::signal::killpg(
-                nix::unistd::Pid::from_raw(pid as i32),
-                nix::sys::signal::Signal::SIGKILL,
-            );
+            Self::force_kill(pid);
         }
         if let Some(handle) = self.exit_monitor.take() {
             handle.abort();
