@@ -36,6 +36,7 @@ impl TaskRunner {
         self.send_status(TaskStatus::Starting).await;
 
         let mut cmd = self.build_command();
+        cmd.stdin(Stdio::null());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
         cmd.kill_on_drop(true);
@@ -50,6 +51,13 @@ impl TaskRunner {
                     })?;
                     Ok(())
             });
+        }
+
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+            cmd.creation_flags(CREATE_NEW_PROCESS_GROUP);
         }
 
         match cmd.spawn() {
@@ -125,11 +133,7 @@ impl TaskRunner {
         }
         #[cfg(windows)]
         {
-            let _ = std::process::Command::new("taskkill")
-                .args(["/T", "/PID", &pid.to_string()])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
+            Self::run_taskkill(&["/T", "/PID", &pid.to_string()]);
         }
     }
 
@@ -143,12 +147,20 @@ impl TaskRunner {
         }
         #[cfg(windows)]
         {
-            let _ = std::process::Command::new("taskkill")
-                .args(["/F", "/T", "/PID", &pid.to_string()])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
+            Self::run_taskkill(&["/F", "/T", "/PID", &pid.to_string()]);
         }
+    }
+
+    #[cfg(windows)]
+    fn run_taskkill(args: &[&str]) {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let _ = std::process::Command::new("taskkill")
+            .args(args)
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
     }
 
     #[allow(dead_code)]
