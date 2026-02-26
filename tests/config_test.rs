@@ -38,7 +38,7 @@ fn test_validate_valid_config() {
 fn test_validate_circular_dep_config() {
     let path = Path::new("tests/fixtures/circular_dep.yaml");
     let config = lnch::config::loader::load_config(path).unwrap();
-    let result = lnch::config::validator::validate_config(&config, Path::new("tests/fixtures"));
+    let result = lnch::process::dependency::DependencyGraph::from_config(&config);
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
     assert!(

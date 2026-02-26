@@ -42,3 +42,18 @@ pub fn config_base_dir(config_path: &Path) -> PathBuf {
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."))
 }
+
+/// Resolve relative `working_dir` paths in all tasks to absolute paths based on `base_dir`.
+///
+/// Without this, `cmd.current_dir()` in TaskRunner resolves relative paths against the
+/// process CWD, which differs from the config file's directory when `lnch` is invoked
+/// from a subdirectory and the config is found via upward search.
+pub fn resolve_working_dirs(config: &mut LnchConfig, base_dir: &Path) {
+    for task in &mut config.tasks {
+        if let Some(ref dir) = task.working_dir {
+            if !dir.is_absolute() {
+                task.working_dir = Some(base_dir.join(dir));
+            }
+        }
+    }
+}

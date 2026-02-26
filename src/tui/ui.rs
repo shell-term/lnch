@@ -82,8 +82,10 @@ pub fn render(frame: &mut Frame, state: &AppState) {
             &selected_task.config.name,
             &selected_task.log_buffer,
             state.log_scroll_offset,
+            &state.last_max_scroll,
         );
     } else {
+        state.last_max_scroll.set(0);
         let block = Block::default().title(" Logs ").borders(Borders::ALL);
         frame.render_widget(block, main_area[1]);
     }

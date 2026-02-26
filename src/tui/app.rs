@@ -1,4 +1,6 @@
+use std::cell::Cell;
 use std::io;
+use std::panic;
 use std::time::Instant;
 
 use crossterm::event::KeyCode;
@@ -16,6 +18,37 @@ use crate::message::{AppEvent, ProcessCommand, ProcessEvent, TaskStatus};
 use super::event::{should_quit, spawn_event_reader};
 use super::ui;
 
+struct TerminalGuard {
+    terminal: Terminal<CrosstermBackend<io::Stdout>>,
+}
+
+impl TerminalGuard {
+    fn new(terminal: Terminal<CrosstermBackend<io::Stdout>>) -> Self {
+        Self { terminal }
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
+        let _ = self.terminal.show_cursor();
+    }
+}
+
+impl std::ops::Deref for TerminalGuard {
+    type Target = Terminal<CrosstermBackend<io::Stdout>>;
+    fn deref(&self) -> &Self::Target {
+        &self.terminal
+    }
+}
+
+impl std::ops::DerefMut for TerminalGuard {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.terminal
+    }
+}
+
 pub struct TaskState {
     pub config: TaskConfig,
     pub status: TaskStatus,
@@ -29,6 +62,9 @@ pub struct AppState {
     pub log_scroll_offset: usize,
     pub should_quit: bool,
     pub auto_scroll: bool,
+    /// Updated by `render_log_view` each frame via interior mutability,
+    /// so scroll logic can compare against the true visual-line max.
+    pub last_max_scroll: Cell<usize>,
 }
 
 pub struct App {
@@ -65,6 +101,7 @@ impl App {
                 log_scroll_offset: 0,
                 should_quit: false,
                 auto_scroll: true,
+                last_max_scroll: Cell::new(0),
             },
             process_cmd_tx,
             process_event_rx: Some(process_event_rx),
@@ -74,12 +111,25 @@ impl App {
     }
 
     pub async fn run(mut self) -> anyhow::Result<()> {
-        let mut terminal = setup_terminal()?;
+        let mut terminal = TerminalGuard::new(setup_terminal()?);
 
-        // Spawn keyboard/tick event reader
+        let prev_hook = panic::take_hook();
+        panic::set_hook(Box::new(move |info| {
+            let _ = disable_raw_mode();
+            let _ = execute!(io::stdout(), LeaveAlternateScreen);
+            prev_hook(info);
+        }));
+
+        let result = self.event_loop(&mut terminal).await;
+
+        // Drop the guard first (restores terminal), then propagate any error
+        drop(terminal);
+        result
+    }
+
+    async fn event_loop(&mut self, terminal: &mut TerminalGuard) -> anyhow::Result<()> {
         let _event_reader = spawn_event_reader(self.app_event_tx.clone());
 
-        // Forward process events to app event channel
         let process_event_tx = self.app_event_tx.clone();
         let mut process_event_rx = self.process_event_rx.take().unwrap();
         tokio::spawn(async move {
@@ -96,7 +146,6 @@ impl App {
 
         let mut app_event_rx = self.app_event_rx.take().unwrap();
 
-        // Main event loop
         loop {
             terminal.draw(|frame| ui::render(frame, &self.state))?;
 
@@ -104,9 +153,7 @@ impl App {
                 Some(AppEvent::Key(key)) => {
                     self.handle_key(key).await;
                 }
-                Some(AppEvent::Tick) => {
-                    // periodic refresh is handled by the draw call
-                }
+                Some(AppEvent::Tick) => {}
                 Some(AppEvent::Process(event)) => {
                     self.handle_process_event(event);
                 }
@@ -115,13 +162,11 @@ impl App {
 
             if self.state.should_quit {
                 let _ = self.process_cmd_tx.send(ProcessCommand::Shutdown).await;
-                // Give some time for shutdown
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 break;
             }
         }
 
-        restore_terminal(&mut terminal)?;
         Ok(())
     }
 
@@ -225,19 +270,16 @@ impl App {
     }
 
     fn scroll_log_down(&mut self) {
-        self.state.log_scroll_offset += 10;
-        // If we've scrolled to the bottom, re-enable auto_scroll
-        if let Some(task) = self.state.tasks.get(self.state.selected_index) {
-            if self.state.log_scroll_offset >= task.log_buffer.len().saturating_sub(1) {
-                self.state.auto_scroll = true;
-            }
+        self.state.log_scroll_offset = self.state.log_scroll_offset.saturating_add(10);
+        if self.state.log_scroll_offset >= self.state.last_max_scroll.get() {
+            self.state.auto_scroll = true;
         }
     }
 
     fn snap_scroll_to_bottom(&mut self) {
-        if let Some(task) = self.state.tasks.get(self.state.selected_index) {
-            self.state.log_scroll_offset = task.log_buffer.len();
-        }
+        // Use usize::MAX as a sentinel; render_log_view clamps it to the
+        // actual visual-line max_scroll each frame.
+        self.state.log_scroll_offset = usize::MAX;
     }
 
     fn reset_scroll(&mut self) {
@@ -273,13 +315,4 @@ fn setup_terminal() -> anyhow::Result<Terminal<CrosstermBackend<io::Stdout>>> {
     let backend = CrosstermBackend::new(stdout);
     let terminal = Terminal::new(backend)?;
     Ok(terminal)
-}
-
-fn restore_terminal(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-) -> anyhow::Result<()> {
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
-    Ok(())
 }

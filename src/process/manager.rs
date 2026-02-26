@@ -13,7 +13,6 @@ pub struct ProcessManager {
     cmd_rx: mpsc::Receiver<ProcessCommand>,
     #[allow(dead_code)]
     event_tx: mpsc::Sender<ProcessEvent>,
-    exit_monitors: HashMap<String, tokio::task::JoinHandle<(String, Option<i32>)>>,
 }
 
 impl ProcessManager {
@@ -34,7 +33,6 @@ impl ProcessManager {
             dependency_graph,
             cmd_rx,
             event_tx,
-            exit_monitors: HashMap::new(),
         }
     }
 
@@ -69,23 +67,13 @@ impl ProcessManager {
             if runner.is_running() {
                 return;
             }
-            match runner.start().await {
-                Ok(()) => {
-                    if let Some(handle) = runner.spawn_exit_monitor() {
-                        self.exit_monitors.insert(name.to_string(), handle);
-                    }
-                }
-                Err(e) => {
-                    tracing::error!(task = %name, error = %e, "Failed to start task");
-                }
+            if let Err(e) = runner.start().await {
+                tracing::error!(task = %name, error = %e, "Failed to start task");
             }
         }
     }
 
     async fn stop_task(&mut self, name: &str) {
-        if let Some(monitor) = self.exit_monitors.remove(name) {
-            monitor.abort();
-        }
         if let Some(runner) = self.runners.get_mut(name) {
             if let Err(e) = runner.stop().await {
                 tracing::error!(task = %name, error = %e, "Failed to stop task");

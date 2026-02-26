@@ -229,4 +229,18 @@ mod tests {
             .to_string()
             .contains("Circular dependency"));
     }
+
+    #[test]
+    fn test_detect_self_dependency() {
+        let config = LnchConfig {
+            name: "test".to_string(),
+            tasks: vec![task("a", Some(vec!["a"]))],
+        };
+        let result = DependencyGraph::from_config(&config);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Circular dependency"));
+    }
 }

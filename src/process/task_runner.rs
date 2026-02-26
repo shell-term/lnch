@@ -10,7 +10,8 @@ use crate::message::{ProcessEvent, TaskStatus};
 
 pub struct TaskRunner {
     config: TaskConfig,
-    child: Option<Child>,
+    pid: Option<u32>,
+    exit_monitor: Option<tokio::task::JoinHandle<(String, Option<i32>)>>,
     event_tx: mpsc::Sender<ProcessEvent>,
     log_tasks: Vec<tokio::task::JoinHandle<()>>,
 }
@@ -19,7 +20,8 @@ impl TaskRunner {
     pub fn new(config: TaskConfig, event_tx: mpsc::Sender<ProcessEvent>) -> Self {
         Self {
             config,
-            child: None,
+            pid: None,
+            exit_monitor: None,
             event_tx,
             log_tasks: Vec::new(),
         }
@@ -36,6 +38,7 @@ impl TaskRunner {
         let mut cmd = self.build_command();
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
+        cmd.kill_on_drop(true);
 
         #[cfg(unix)]
         unsafe {
@@ -58,11 +61,12 @@ impl TaskRunner {
                     self.spawn_log_reader(stderr, true);
                 }
 
-                let pid = child.id();
-                self.child = Some(child);
+                self.pid = child.id();
                 self.send_status(TaskStatus::Running).await;
+                tracing::info!(task = %self.config.name, pid = ?self.pid, "Task started");
 
-                tracing::info!(task = %self.config.name, ?pid, "Task started");
+                self.spawn_exit_monitor(child);
+
                 Ok(())
             }
             Err(e) => {
@@ -74,14 +78,18 @@ impl TaskRunner {
         }
     }
 
+    #[allow(unused_variables)]
     pub async fn stop(&mut self) -> anyhow::Result<()> {
-        if let Some(ref child) = self.child {
-            self.send_status(TaskStatus::Stopping).await;
+        let pid = match self.pid {
+            Some(pid) => pid,
+            None => return Ok(()),
+        };
 
-            let pid = child.id();
+        self.send_status(TaskStatus::Stopping).await;
 
+        if self.is_running() {
             #[cfg(unix)]
-            if let Some(pid) = pid {
+            {
                 let _ = nix::sys::signal::killpg(
                     nix::unistd::Pid::from_raw(pid as i32),
                     nix::sys::signal::Signal::SIGTERM,
@@ -89,31 +97,39 @@ impl TaskRunner {
             }
 
             #[cfg(windows)]
-            if let Some(ref mut child) = self.child {
-                let _ = child.kill().await;
+            {
+                if let Some(handle) = self.exit_monitor.take() {
+                    handle.abort();
+                }
             }
 
-            match tokio::time::timeout(Duration::from_secs(5), self.wait_for_exit()).await {
-                Ok(_) => {}
-                Err(_) => {
-                    tracing::warn!(task = %self.config.name, "Graceful shutdown timed out, sending SIGKILL");
-                    #[cfg(unix)]
-                    if let Some(pid) = pid {
-                        let _ = nix::sys::signal::killpg(
-                            nix::unistd::Pid::from_raw(pid as i32),
-                            nix::sys::signal::Signal::SIGKILL,
-                        );
-                    }
-                    #[cfg(not(unix))]
-                    if let Some(ref mut child) = self.child {
-                        let _ = child.kill().await;
-                    }
+            let exited = match self.exit_monitor.as_mut() {
+                Some(handle) => {
+                    tokio::time::timeout(Duration::from_secs(5), handle)
+                        .await
+                        .is_ok()
+                }
+                None => true,
+            };
+
+            if !exited {
+                tracing::warn!(task = %self.config.name, "Graceful shutdown timed out, force killing");
+                #[cfg(unix)]
+                {
+                    let _ = nix::sys::signal::killpg(
+                        nix::unistd::Pid::from_raw(pid as i32),
+                        nix::sys::signal::Signal::SIGKILL,
+                    );
+                }
+                if let Some(handle) = self.exit_monitor.take() {
+                    handle.abort();
                 }
             }
         }
 
+        self.exit_monitor = None;
+        self.pid = None;
         self.cleanup_log_tasks().await;
-        self.child = None;
         self.send_status(TaskStatus::Stopped).await;
         tracing::info!(task = %self.config.name, "Task stopped");
         Ok(())
@@ -126,45 +142,42 @@ impl TaskRunner {
     }
 
     pub fn is_running(&self) -> bool {
-        self.child.is_some()
+        self.exit_monitor
+            .as_ref()
+            .map_or(false, |h| !h.is_finished())
     }
 
-    /// Spawn exit monitor; returns a JoinHandle that resolves when the child exits
-    pub fn spawn_exit_monitor(&mut self) -> Option<tokio::task::JoinHandle<(String, Option<i32>)>> {
-        if let Some(mut child) = self.child.take() {
-            let name = self.config.name.clone();
-            let event_tx = self.event_tx.clone();
+    fn spawn_exit_monitor(&mut self, mut child: Child) {
+        let name = self.config.name.clone();
+        let event_tx = self.event_tx.clone();
 
-            let handle = tokio::spawn(async move {
-                let status = child.wait().await;
-                let exit_code = status.ok().and_then(|s| s.code());
+        let handle = tokio::spawn(async move {
+            let status = child.wait().await;
+            let exit_code = status.ok().and_then(|s| s.code());
 
-                let task_status = match exit_code {
-                    Some(0) => TaskStatus::Stopped,
-                    code => TaskStatus::Failed { exit_code: code },
-                };
+            let task_status = match exit_code {
+                Some(0) => TaskStatus::Stopped,
+                code => TaskStatus::Failed { exit_code: code },
+            };
 
-                let _ = event_tx
-                    .send(ProcessEvent::StatusChanged {
-                        task_name: name.clone(),
-                        status: task_status,
-                    })
-                    .await;
+            let _ = event_tx
+                .send(ProcessEvent::StatusChanged {
+                    task_name: name.clone(),
+                    status: task_status,
+                })
+                .await;
 
-                let _ = event_tx
-                    .send(ProcessEvent::ProcessExited {
-                        task_name: name.clone(),
-                        exit_code,
-                    })
-                    .await;
+            let _ = event_tx
+                .send(ProcessEvent::ProcessExited {
+                    task_name: name.clone(),
+                    exit_code,
+                })
+                .await;
 
-                (name, exit_code)
-            });
+            (name, exit_code)
+        });
 
-            Some(handle)
-        } else {
-            None
-        }
+        self.exit_monitor = Some(handle);
     }
 
     fn build_command(&self) -> tokio::process::Command {
@@ -213,12 +226,6 @@ impl TaskRunner {
         self.log_tasks.push(handle);
     }
 
-    async fn wait_for_exit(&mut self) {
-        if let Some(ref mut child) = self.child {
-            let _ = child.wait().await;
-        }
-    }
-
     async fn cleanup_log_tasks(&mut self) {
         for handle in self.log_tasks.drain(..) {
             handle.abort();
@@ -250,13 +257,14 @@ impl TaskRunner {
 impl Drop for TaskRunner {
     fn drop(&mut self) {
         #[cfg(unix)]
-        if let Some(ref child) = self.child {
-            if let Some(pid) = child.id() {
-                let _ = nix::sys::signal::killpg(
-                    nix::unistd::Pid::from_raw(pid as i32),
-                    nix::sys::signal::Signal::SIGKILL,
-                );
-            }
+        if let Some(pid) = self.pid {
+            let _ = nix::sys::signal::killpg(
+                nix::unistd::Pid::from_raw(pid as i32),
+                nix::sys::signal::Signal::SIGKILL,
+            );
+        }
+        if let Some(handle) = self.exit_monitor.take() {
+            handle.abort();
         }
         for handle in &self.log_tasks {
             handle.abort();

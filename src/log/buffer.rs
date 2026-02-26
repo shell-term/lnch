@@ -39,6 +39,7 @@ impl LogBuffer {
         &self.lines
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.lines.len()
     }

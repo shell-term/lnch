@@ -10,7 +10,7 @@ use clap::Parser;
 use tokio::sync::mpsc;
 
 use crate::cli::Cli;
-use crate::config::loader::{config_base_dir, find_config, load_config};
+use crate::config::loader::{config_base_dir, find_config, load_config, resolve_working_dirs};
 use crate::config::validator::validate_config;
 use crate::message::{ProcessCommand, ProcessEvent};
 use crate::process::dependency::DependencyGraph;
@@ -31,9 +31,10 @@ async fn main() -> anyhow::Result<()> {
         None => find_config()?,
     };
 
-    let config = load_config(&config_path)?;
+    let mut config = load_config(&config_path)?;
     let base_dir = config_base_dir(&config_path);
     validate_config(&config, &base_dir).map_err(|e| anyhow::anyhow!("{}", e))?;
+    resolve_working_dirs(&mut config, &base_dir);
 
     let dependency_graph = DependencyGraph::from_config(&config)
         .map_err(|e| anyhow::anyhow!("{}", e))?;
