@@ -10,6 +10,7 @@ dist/
 build/
 out/
 bin/
+target/
 *.exe
 *.dll
 *.so
