@@ -29,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
             tracing_subscriber::fmt()
                 .with_writer(Mutex::new(file))
                 .with_ansi(false)
-                .with_max_level(tracing::Level::DEBUG)
+                .with_max_level(tracing::Level::INFO)
                 .init();
         }
         None => {

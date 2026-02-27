@@ -176,6 +176,10 @@ impl App {
     }
 
     async fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
+        if key.kind != crossterm::event::KeyEventKind::Press {
+            return;
+        }
+
         if should_quit(&key) {
             self.state.should_quit = true;
             return;
