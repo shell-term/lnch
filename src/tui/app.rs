@@ -151,16 +151,21 @@ impl App {
 
             match app_event_rx.recv().await {
                 Some(AppEvent::Key(key)) => {
+                    tracing::debug!(key = ?key, "Key event received");
                     self.handle_key(key).await;
                 }
                 Some(AppEvent::Tick) => {}
                 Some(AppEvent::Process(event)) => {
                     self.handle_process_event(event);
                 }
-                None => break,
+                None => {
+                    tracing::warn!("App event channel closed, exiting");
+                    break;
+                }
             }
 
             if self.state.should_quit {
+                tracing::info!("App quit triggered, sending Shutdown");
                 let _ = self.process_cmd_tx.send(ProcessCommand::Shutdown).await;
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 break;

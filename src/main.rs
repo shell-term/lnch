@@ -29,6 +29,7 @@ async fn main() -> anyhow::Result<()> {
             tracing_subscriber::fmt()
                 .with_writer(Mutex::new(file))
                 .with_ansi(false)
+                .with_max_level(tracing::Level::DEBUG)
                 .init();
         }
         None => {
@@ -64,6 +65,7 @@ async fn main() -> anyhow::Result<()> {
             setup_signal_handler(shutdown_tx).await;
         });
         if shutdown_rx.recv().await.is_some() {
+            tracing::warn!("Signal handler triggered shutdown");
             let _ = shutdown_cmd_tx.send(ProcessCommand::Shutdown).await;
         }
     });

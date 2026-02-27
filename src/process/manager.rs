@@ -38,6 +38,7 @@ impl ProcessManager {
 
     pub async fn run(&mut self) {
         while let Some(cmd) = self.cmd_rx.recv().await {
+            tracing::info!(command = ?cmd, "ProcessManager received command");
             match cmd {
                 ProcessCommand::Start(name) => {
                     self.start_task(&name).await;
@@ -55,6 +56,7 @@ impl ProcessManager {
                     self.stop_all().await;
                 }
                 ProcessCommand::Shutdown => {
+                    tracing::info!("Shutdown requested, stopping all tasks");
                     self.stop_all().await;
                     break;
                 }
