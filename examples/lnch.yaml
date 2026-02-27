@@ -1,0 +1,8 @@
+name: example-project
+tasks:
+  - name: server
+    command: 'i=0; while true; do i=$((i+1)); printf "[%s] Request #%d handled\n" "$(date +%H:%M:%S)" "$i"; sleep 2; done'
+    color: green
+  - name: worker
+    command: 'i=0; while true; do i=$((i+1)); printf "[%s] Job #%d processed\n" "$(date +%H:%M:%S)" "$i" >&2; sleep 3; done'
+    color: blue

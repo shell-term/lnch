@@ -36,6 +36,7 @@ impl TaskRunner {
         self.send_status(TaskStatus::Starting).await;
 
         let mut cmd = self.build_command();
+        cmd.stdin(Stdio::null());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
         cmd.kill_on_drop(true);
@@ -50,6 +51,13 @@ impl TaskRunner {
                     })?;
                     Ok(())
             });
+        }
+
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+            cmd.creation_flags(CREATE_NEW_PROCESS_GROUP);
         }
 
         match cmd.spawn() {
@@ -78,7 +86,6 @@ impl TaskRunner {
         }
     }
 
-    #[allow(unused_variables)]
     pub async fn stop(&mut self) -> anyhow::Result<()> {
         let pid = match self.pid {
             Some(pid) => pid,
@@ -88,20 +95,7 @@ impl TaskRunner {
         self.send_status(TaskStatus::Stopping).await;
 
         if self.is_running() {
-            #[cfg(unix)]
-            {
-                let _ = nix::sys::signal::killpg(
-                    nix::unistd::Pid::from_raw(pid as i32),
-                    nix::sys::signal::Signal::SIGTERM,
-                );
-            }
-
-            #[cfg(windows)]
-            {
-                if let Some(handle) = self.exit_monitor.take() {
-                    handle.abort();
-                }
-            }
+            Self::graceful_terminate(pid);
 
             let exited = match self.exit_monitor.as_mut() {
                 Some(handle) => {
@@ -114,13 +108,7 @@ impl TaskRunner {
 
             if !exited {
                 tracing::warn!(task = %self.config.name, "Graceful shutdown timed out, force killing");
-                #[cfg(unix)]
-                {
-                    let _ = nix::sys::signal::killpg(
-                        nix::unistd::Pid::from_raw(pid as i32),
-                        nix::sys::signal::Signal::SIGKILL,
-                    );
-                }
+                Self::force_kill(pid);
                 if let Some(handle) = self.exit_monitor.take() {
                     handle.abort();
                 }
@@ -133,6 +121,46 @@ impl TaskRunner {
         self.send_status(TaskStatus::Stopped).await;
         tracing::info!(task = %self.config.name, "Task stopped");
         Ok(())
+    }
+
+    fn graceful_terminate(pid: u32) {
+        #[cfg(unix)]
+        {
+            let _ = nix::sys::signal::killpg(
+                nix::unistd::Pid::from_raw(pid as i32),
+                nix::sys::signal::Signal::SIGTERM,
+            );
+        }
+        #[cfg(windows)]
+        {
+            Self::run_taskkill(&["/T", "/PID", &pid.to_string()]);
+        }
+    }
+
+    fn force_kill(pid: u32) {
+        #[cfg(unix)]
+        {
+            let _ = nix::sys::signal::killpg(
+                nix::unistd::Pid::from_raw(pid as i32),
+                nix::sys::signal::Signal::SIGKILL,
+            );
+        }
+        #[cfg(windows)]
+        {
+            Self::run_taskkill(&["/F", "/T", "/PID", &pid.to_string()]);
+        }
+    }
+
+    #[cfg(windows)]
+    fn run_taskkill(args: &[&str]) {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let _ = std::process::Command::new("taskkill")
+            .args(args)
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
     }
 
     #[allow(dead_code)]
@@ -153,7 +181,38 @@ impl TaskRunner {
 
         let handle = tokio::spawn(async move {
             let status = child.wait().await;
-            let exit_code = status.ok().and_then(|s| s.code());
+
+            let exit_code = match &status {
+                Ok(s) => {
+                    tracing::info!(task = %name, status = ?s, "Process exited");
+                    s.code()
+                }
+                Err(e) => {
+                    tracing::error!(task = %name, error = %e, "Process wait failed");
+                    let _ = event_tx
+                        .send(ProcessEvent::LogLine {
+                            task_name: name.clone(),
+                            line: format!("Process error: {}", e),
+                            is_stderr: true,
+                        })
+                        .await;
+                    None
+                }
+            };
+
+            if exit_code != Some(0) {
+                let msg = match exit_code {
+                    Some(code) => format!("Process exited with code {} {}", code, exit_code_hint(code)),
+                    None => "Process terminated (unknown exit code)".to_string(),
+                };
+                let _ = event_tx
+                    .send(ProcessEvent::LogLine {
+                        task_name: name.clone(),
+                        line: msg,
+                        is_stderr: true,
+                    })
+                    .await;
+            }
 
             let task_status = match exit_code {
                 Some(0) => TaskStatus::Stopped,
@@ -254,14 +313,24 @@ impl TaskRunner {
     }
 }
 
+fn exit_code_hint(code: i32) -> &'static str {
+    match code {
+        // Windows-specific exit codes
+        9009 => "(command not found — check that the program is installed and in PATH)",
+        3 => "(path not found)",
+        5 => "(access denied)",
+        // Unix signals (128 + signal number)
+        130 => "(interrupted by Ctrl+C / SIGINT)",
+        137 => "(killed / SIGKILL)",
+        143 => "(terminated / SIGTERM)",
+        _ => "",
+    }
+}
+
 impl Drop for TaskRunner {
     fn drop(&mut self) {
-        #[cfg(unix)]
         if let Some(pid) = self.pid {
-            let _ = nix::sys::signal::killpg(
-                nix::unistd::Pid::from_raw(pid as i32),
-                nix::sys::signal::Signal::SIGKILL,
-            );
+            Self::force_kill(pid);
         }
         if let Some(handle) = self.exit_monitor.take() {
             handle.abort();

@@ -21,6 +21,7 @@ pub async fn setup_signal_handler(shutdown_tx: mpsc::Sender<()>) {
         tokio::signal::ctrl_c()
             .await
             .expect("Failed to set up Ctrl+C handler");
+        tracing::warn!("Signal handler: Ctrl+C received, requesting shutdown");
         let _ = shutdown_tx.send(()).await;
     }
 }
