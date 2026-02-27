@@ -184,14 +184,35 @@ impl TaskRunner {
 
             let exit_code = match &status {
                 Ok(s) => {
-                    tracing::info!(task = %name, status = ?s, "Process exited normally");
+                    tracing::info!(task = %name, status = ?s, "Process exited");
                     s.code()
                 }
                 Err(e) => {
                     tracing::error!(task = %name, error = %e, "Process wait failed");
+                    let _ = event_tx
+                        .send(ProcessEvent::LogLine {
+                            task_name: name.clone(),
+                            line: format!("Process error: {}", e),
+                            is_stderr: true,
+                        })
+                        .await;
                     None
                 }
             };
+
+            if exit_code != Some(0) {
+                let msg = match exit_code {
+                    Some(code) => format!("Process exited with code {} {}", code, exit_code_hint(code)),
+                    None => "Process terminated (unknown exit code)".to_string(),
+                };
+                let _ = event_tx
+                    .send(ProcessEvent::LogLine {
+                        task_name: name.clone(),
+                        line: msg,
+                        is_stderr: true,
+                    })
+                    .await;
+            }
 
             let task_status = match exit_code {
                 Some(0) => TaskStatus::Stopped,
@@ -289,6 +310,20 @@ impl TaskRunner {
                 is_stderr,
             })
             .await;
+    }
+}
+
+fn exit_code_hint(code: i32) -> &'static str {
+    match code {
+        // Windows-specific exit codes
+        9009 => "(command not found — check that the program is installed and in PATH)",
+        3 => "(path not found)",
+        5 => "(access denied)",
+        // Unix signals (128 + signal number)
+        130 => "(interrupted by Ctrl+C / SIGINT)",
+        137 => "(killed / SIGKILL)",
+        143 => "(terminated / SIGTERM)",
+        _ => "",
     }
 }
 
