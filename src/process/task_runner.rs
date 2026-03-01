@@ -133,7 +133,13 @@ impl TaskRunner {
         }
         #[cfg(windows)]
         {
-            Self::run_taskkill(&["/T", "/PID", &pid.to_string()]);
+            use windows_sys::Win32::System::Console::{GenerateConsoleCtrlEvent, CTRL_BREAK_EVENT};
+            // CTRL_BREAK_EVENT works for console apps started with CREATE_NEW_PROCESS_GROUP.
+            // Falls back to taskkill (WM_CLOSE) for GUI apps or if the event fails.
+            let sent = unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid) };
+            if sent == 0 {
+                Self::run_taskkill(&["/T", "/PID", &pid.to_string()]);
+            }
         }
     }
 
@@ -286,9 +292,16 @@ impl TaskRunner {
     }
 
     async fn cleanup_log_tasks(&mut self) {
-        for handle in self.log_tasks.drain(..) {
-            handle.abort();
-        }
+        // After the process exits, the pipe write-ends are closed and
+        // the log readers will reach EOF shortly. Give them time to
+        // drain any remaining buffered output (e.g. shutdown messages)
+        // rather than aborting immediately.
+        let handles: Vec<_> = self.log_tasks.drain(..).collect();
+        let _ = tokio::time::timeout(
+            Duration::from_millis(500),
+            futures::future::join_all(handles),
+        )
+        .await;
     }
 
     async fn send_status(&self, status: TaskStatus) {
