@@ -186,8 +186,8 @@ impl App {
         }
 
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => self.select_previous_task(),
-            KeyCode::Down | KeyCode::Char('j') => self.select_next_task(),
+            KeyCode::Up => self.select_previous_task(),
+            KeyCode::Down => self.select_next_task(),
 
             KeyCode::Char('a') => {
                 let _ = self.process_cmd_tx.send(ProcessCommand::StartAll).await;
@@ -206,8 +206,8 @@ impl App {
                 let _ = self.process_cmd_tx.send(ProcessCommand::Restart(name)).await;
             }
 
-            KeyCode::PageUp => self.scroll_log_up(),
-            KeyCode::PageDown => self.scroll_log_down(),
+            KeyCode::Char('k') => self.scroll_log_up(),
+            KeyCode::Char('j') => self.scroll_log_down(),
             KeyCode::Home => {
                 self.state.log_scroll_offset = 0;
                 self.state.auto_scroll = false;
@@ -275,13 +275,25 @@ impl App {
 
     fn scroll_log_up(&mut self) {
         self.state.auto_scroll = false;
-        self.state.log_scroll_offset = self.state.log_scroll_offset.saturating_sub(10);
+        // Normalize sentinel (usize::MAX) to the actual max before subtracting,
+        // otherwise the arithmetic has no visible effect.
+        let current = self
+            .state
+            .log_scroll_offset
+            .min(self.state.last_max_scroll.get());
+        self.state.log_scroll_offset = current.saturating_sub(10);
     }
 
     fn scroll_log_down(&mut self) {
-        self.state.log_scroll_offset = self.state.log_scroll_offset.saturating_add(10);
+        // Same normalization for consistency.
+        let current = self
+            .state
+            .log_scroll_offset
+            .min(self.state.last_max_scroll.get());
+        self.state.log_scroll_offset = current.saturating_add(10);
         if self.state.log_scroll_offset >= self.state.last_max_scroll.get() {
             self.state.auto_scroll = true;
+            self.snap_scroll_to_bottom();
         }
     }
 
