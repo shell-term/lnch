@@ -38,10 +38,7 @@ async fn test_process_stays_alive_for_duration() {
     // Check that no unexpected exit events were received
     while let Ok(event) = event_rx.try_recv() {
         if let ProcessEvent::ProcessExited { exit_code, .. } = &event {
-            panic!(
-                "Process exited unexpectedly with code: {:?}",
-                exit_code
-            );
+            panic!("Process exited unexpectedly with code: {:?}", exit_code);
         }
     }
 
