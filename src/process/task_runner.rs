@@ -256,6 +256,11 @@ impl TaskRunner {
             cmd.current_dir(dir);
         }
 
+        // Force line-buffered/unbuffered stdout for common runtimes.
+        // When stdout is piped (not a TTY), many languages default to block
+        // buffering, which prevents log lines from reaching the TUI promptly.
+        cmd.env("PYTHONUNBUFFERED", "1");
+
         if let Some(ref env_vars) = self.config.env {
             for (key, value) in env_vars {
                 cmd.env(key, value);
