@@ -15,8 +15,8 @@ pub fn render_status_bar(frame: &mut Frame, area: Rect) {
         Span::raw(" Quit"),
     ]);
 
-    let bar = Paragraph::new(help_text)
-        .style(Style::default().bg(Color::DarkGray).fg(Color::White));
+    let bar =
+        Paragraph::new(help_text).style(Style::default().bg(Color::DarkGray).fg(Color::White));
 
     frame.render_widget(bar, area);
 }

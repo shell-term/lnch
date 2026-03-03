@@ -33,9 +33,7 @@ async fn main() -> anyhow::Result<()> {
                 .init();
         }
         None => {
-            tracing_subscriber::fmt()
-                .with_writer(std::io::sink)
-                .init();
+            tracing_subscriber::fmt().with_writer(std::io::sink).init();
         }
     }
 
@@ -51,8 +49,8 @@ async fn main() -> anyhow::Result<()> {
     validate_config(&config, &base_dir).map_err(|e| anyhow::anyhow!("{}", e))?;
     resolve_working_dirs(&mut config, &base_dir);
 
-    let dependency_graph = DependencyGraph::from_config(&config)
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    let dependency_graph =
+        DependencyGraph::from_config(&config).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     let (cmd_tx, cmd_rx) = mpsc::channel::<ProcessCommand>(64);
     let (event_tx, event_rx) = mpsc::channel::<ProcessEvent>(256);

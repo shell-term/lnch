@@ -46,16 +46,14 @@ impl TaskRunner {
             #[allow(unused_imports)]
             use std::os::unix::process::CommandExt;
             cmd.pre_exec(|| {
-                    nix::unistd::setsid().map_err(|e| {
-                        std::io::Error::new(std::io::ErrorKind::Other, e)
-                    })?;
-                    Ok(())
+                nix::unistd::setsid()
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                Ok(())
             });
         }
 
         #[cfg(windows)]
         {
-            use std::os::windows::process::CommandExt;
             const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
             cmd.creation_flags(CREATE_NEW_PROCESS_GROUP);
         }
@@ -80,7 +78,8 @@ impl TaskRunner {
             Err(e) => {
                 let err_msg = format!("Failed to start: {}", e);
                 self.send_log_line(err_msg, true).await;
-                self.send_status(TaskStatus::Failed { exit_code: None }).await;
+                self.send_status(TaskStatus::Failed { exit_code: None })
+                    .await;
                 Err(e.into())
             }
         }
@@ -98,11 +97,9 @@ impl TaskRunner {
             Self::graceful_terminate(pid);
 
             let exited = match self.exit_monitor.as_mut() {
-                Some(handle) => {
-                    tokio::time::timeout(Duration::from_secs(5), handle)
-                        .await
-                        .is_ok()
-                }
+                Some(handle) => tokio::time::timeout(Duration::from_secs(5), handle)
+                    .await
+                    .is_ok(),
                 None => true,
             };
 
@@ -176,9 +173,7 @@ impl TaskRunner {
     }
 
     pub fn is_running(&self) -> bool {
-        self.exit_monitor
-            .as_ref()
-            .map_or(false, |h| !h.is_finished())
+        self.exit_monitor.as_ref().is_some_and(|h| !h.is_finished())
     }
 
     fn spawn_exit_monitor(&mut self, mut child: Child) {
@@ -208,7 +203,9 @@ impl TaskRunner {
 
             if exit_code != Some(0) {
                 let msg = match exit_code {
-                    Some(code) => format!("Process exited with code {} {}", code, exit_code_hint(code)),
+                    Some(code) => {
+                        format!("Process exited with code {} {}", code, exit_code_hint(code))
+                    }
                     None => "Process terminated (unknown exit code)".to_string(),
                 };
                 let _ = event_tx
