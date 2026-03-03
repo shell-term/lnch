@@ -13,10 +13,7 @@ fn test_parse_valid_config() {
     assert_eq!(config.tasks[0].command, "echo \"hello from A\"");
     assert_eq!(config.tasks[0].color, Some("green".to_string()));
     assert_eq!(config.tasks[1].name, "task-b");
-    assert_eq!(
-        config.tasks[1].depends_on,
-        Some(vec!["task-a".to_string()])
-    );
+    assert_eq!(config.tasks[1].depends_on, Some(vec!["task-a".to_string()]));
 }
 
 #[test]

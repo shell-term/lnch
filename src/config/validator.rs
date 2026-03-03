@@ -5,9 +5,7 @@ use crate::error::LnchError;
 
 use super::model::LnchConfig;
 
-const VALID_COLORS: &[&str] = &[
-    "red", "green", "yellow", "blue", "magenta", "cyan", "white",
-];
+const VALID_COLORS: &[&str] = &["red", "green", "yellow", "blue", "magenta", "cyan", "white"];
 
 /// Validate the loaded config for consistency
 pub fn validate_config(config: &LnchConfig, base_dir: &Path) -> Result<(), LnchError> {
@@ -116,10 +114,7 @@ mod tests {
         };
         let result = validate_config(&config, Path::new("."));
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("No tasks defined"));
+        assert!(result.unwrap_err().to_string().contains("No tasks defined"));
     }
 
     #[test]

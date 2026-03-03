@@ -6,9 +6,9 @@ pub async fn setup_signal_handler(shutdown_tx: mpsc::Sender<()>) {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{signal, SignalKind};
-        let mut sigterm = signal(SignalKind::terminate()).expect("Failed to set up SIGTERM handler");
-        let mut sigint =
-            signal(SignalKind::interrupt()).expect("Failed to set up SIGINT handler");
+        let mut sigterm =
+            signal(SignalKind::terminate()).expect("Failed to set up SIGTERM handler");
+        let mut sigint = signal(SignalKind::interrupt()).expect("Failed to set up SIGINT handler");
         tokio::select! {
             _ = sigterm.recv() => {},
             _ = sigint.recv() => {},

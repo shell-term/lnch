@@ -40,13 +40,12 @@ pub fn render(frame: &mut Frame, state: &AppState) {
         .split(frame.area());
 
     // Title bar
-    let title = Paragraph::new(format!(" lnch: {} ", state.project_name))
-        .style(
-            Style::default()
-                .fg(Color::White)
-                .bg(Color::Blue)
-                .add_modifier(Modifier::BOLD),
-        );
+    let title = Paragraph::new(format!(" lnch: {} ", state.project_name)).style(
+        Style::default()
+            .fg(Color::White)
+            .bg(Color::Blue)
+            .add_modifier(Modifier::BOLD),
+    );
     frame.render_widget(title, root[0]);
 
     // Main content area

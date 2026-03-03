@@ -203,7 +203,10 @@ impl App {
             }
             KeyCode::Char('r') => {
                 let name = self.selected_task_name();
-                let _ = self.process_cmd_tx.send(ProcessCommand::Restart(name)).await;
+                let _ = self
+                    .process_cmd_tx
+                    .send(ProcessCommand::Restart(name))
+                    .await;
             }
 
             KeyCode::Char('k') => self.scroll_log_up(),
