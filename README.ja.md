@@ -33,6 +33,30 @@
 
 ## インストール
 
+### macOS / Linux
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/shell-term/lnch/releases/latest/download/lnch-installer.sh | sh
+```
+
+### Windows (PowerShell)
+
+```powershell
+powershell -c "irm https://github.com/shell-term/lnch/releases/latest/download/lnch-installer.ps1 | iex"
+```
+
+### Homebrew (macOS / Linux)
+
+```bash
+brew install shell-term/tap/lnch
+```
+
+### cargo-binstall
+
+```bash
+cargo binstall lnch
+```
+
 ### ソースからビルド（[Rust ツールチェーン](https://rustup.rs/)が必要）
 
 ```bash

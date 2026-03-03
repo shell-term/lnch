@@ -33,6 +33,30 @@ A TUI multi-process launcher for your dev environment — manage all your local 
 
 ## Installation
 
+### macOS / Linux
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/shell-term/lnch/releases/latest/download/lnch-installer.sh | sh
+```
+
+### Windows (PowerShell)
+
+```powershell
+powershell -c "irm https://github.com/shell-term/lnch/releases/latest/download/lnch-installer.ps1 | iex"
+```
+
+### Homebrew (macOS / Linux)
+
+```bash
+brew install shell-term/tap/lnch
+```
+
+### cargo-binstall
+
+```bash
+cargo binstall lnch
+```
+
 ### From source (requires [Rust toolchain](https://rustup.rs/))
 
 ```bash
