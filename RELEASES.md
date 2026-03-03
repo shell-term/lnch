@@ -1,3 +1,14 @@
+# v0.1.1
+
+## Bug Fixes
+
+- **Fix log scroll not reaching bottom** -- Log view scroll could not reach the end of output when long lines (e.g. error messages) triggered word-wrapping. Replaced approximate visual line counting with ratatui's exact `Paragraph::line_count()`.
+
+## Maintenance
+
+- **Update all dependencies** -- ratatui 0.29→0.30, crossterm 0.28→0.29, nix 0.29→0.31, windows-sys 0.59→0.61
+- **Code quality** -- Apply rustfmt across all source files; fix clippy warnings (unused imports, idiomatic API usage)
+
 # v0.1.0
 
 Initial release of lnch - a TUI multi-process launcher for your dev environment.
