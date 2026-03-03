@@ -1,3 +1,9 @@
+# v0.1.2
+
+## Bug Fixes
+
+- **Fix Python stdout not appearing in TUI** -- Python's stdout defaults to block buffering when piped, preventing log messages (e.g. "Frontend serving at ...") from reaching the TUI. Now sets `PYTHONUNBUFFERED=1` for all spawned processes.
+
 # v0.1.1
 
 ## Bug Fixes
