@@ -1,3 +1,9 @@
+# v0.1.4
+
+## Bug Fixes
+
+- **Fix log display truncation for rapid output** -- The event loop processed only one event per draw cycle, causing the log view to lag behind fast-producing processes and the tail to appear cut off. Now drains all pending events before each redraw.
+
 # v0.1.3
 
 ## New Features
