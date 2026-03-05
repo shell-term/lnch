@@ -1,3 +1,9 @@
+# v0.1.3
+
+## New Features
+
+- **Windows ConPTY support** -- Use Windows Pseudo Console (ConPTY) for child processes so that grandchild processes (e.g. Python multiprocessing workers) receive valid console handles. Fixes `OSError: [Errno 22] Invalid argument` on Windows when launched programs use multiprocessing. Falls back to pipe mode on older Windows versions. Unix behavior is unchanged.
+
 # v0.1.2
 
 ## Bug Fixes
