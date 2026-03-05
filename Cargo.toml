@@ -27,7 +27,14 @@ tracing-subscriber = "0.3"
 nix = { version = "0.31", features = ["signal", "process"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_System_Threading", "Win32_Foundation", "Win32_System_Console"] }
+windows-sys = { version = "0.61", features = [
+    "Win32_System_Threading",
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_System_Pipes",
+    "Win32_Security",
+] }
+strip-ansi-escapes = "0.2"
 
 # The profile that 'dist' will build with
 [profile.dist]

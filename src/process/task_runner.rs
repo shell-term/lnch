@@ -14,6 +14,8 @@ pub struct TaskRunner {
     exit_monitor: Option<tokio::task::JoinHandle<(String, Option<i32>)>>,
     event_tx: mpsc::Sender<ProcessEvent>,
     log_tasks: Vec<tokio::task::JoinHandle<()>>,
+    #[cfg(windows)]
+    pty_input: Option<std::fs::File>,
 }
 
 impl TaskRunner {
@@ -24,6 +26,8 @@ impl TaskRunner {
             exit_monitor: None,
             event_tx,
             log_tasks: Vec::new(),
+            #[cfg(windows)]
+            pty_input: None,
         }
     }
 
@@ -32,9 +36,32 @@ impl TaskRunner {
         &self.config.name
     }
 
+    // ------------------------------------------------------------------
+    // Start
+    // ------------------------------------------------------------------
+
     pub async fn start(&mut self) -> anyhow::Result<()> {
         self.send_status(TaskStatus::Starting).await;
 
+        #[cfg(windows)]
+        {
+            match self.start_with_pty().await {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    tracing::warn!(
+                        task = %self.config.name,
+                        error = %e,
+                        "ConPTY unavailable, falling back to pipe mode"
+                    );
+                }
+            }
+        }
+
+        self.start_with_pipes().await
+    }
+
+    /// Pipe-based process startup (all platforms; fallback on Windows).
+    async fn start_with_pipes(&mut self) -> anyhow::Result<()> {
         let mut cmd = self.build_command();
         cmd.stdin(Stdio::null());
         cmd.stdout(Stdio::piped());
@@ -69,7 +96,7 @@ impl TaskRunner {
 
                 self.pid = child.id();
                 self.send_status(TaskStatus::Running).await;
-                tracing::info!(task = %self.config.name, pid = ?self.pid, "Task started");
+                tracing::info!(task = %self.config.name, pid = ?self.pid, "Task started (pipe mode)");
 
                 self.spawn_exit_monitor(child);
 
@@ -85,6 +112,42 @@ impl TaskRunner {
         }
     }
 
+    /// ConPTY-based process startup (Windows only).
+    ///
+    /// Gives the child a virtual console so grandchild processes (e.g. Python
+    /// multiprocessing workers) receive valid console handles regardless of
+    /// handle inheritance settings.
+    #[cfg(windows)]
+    async fn start_with_pty(&mut self) -> anyhow::Result<()> {
+        use crate::process::pty::PtyProcess;
+
+        let mut pty = PtyProcess::spawn(
+            &self.config.command,
+            self.config.working_dir.as_deref(),
+            self.config.env.as_ref(),
+        )?;
+
+        let pid = pty.pid();
+        self.pid = Some(pid);
+
+        if let Some(output) = pty.take_output() {
+            self.spawn_pty_log_reader(output);
+        }
+
+        self.pty_input = Some(pty.write_input_handle()?);
+
+        self.send_status(TaskStatus::Running).await;
+        tracing::info!(task = %self.config.name, pid = pid, "Task started (ConPTY mode)");
+
+        self.spawn_pty_exit_monitor(pty);
+
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    // Stop
+    // ------------------------------------------------------------------
+
     pub async fn stop(&mut self) -> anyhow::Result<()> {
         let pid = match self.pid {
             Some(pid) => pid,
@@ -94,7 +157,7 @@ impl TaskRunner {
         self.send_status(TaskStatus::Stopping).await;
 
         if self.is_running() {
-            Self::graceful_terminate(pid);
+            self.graceful_terminate(pid);
 
             let exited = match self.exit_monitor.as_mut() {
                 Some(handle) => tokio::time::timeout(Duration::from_secs(5), handle)
@@ -114,29 +177,37 @@ impl TaskRunner {
 
         self.exit_monitor = None;
         self.pid = None;
+        #[cfg(windows)]
+        {
+            self.pty_input = None;
+        }
         self.cleanup_log_tasks().await;
         self.send_status(TaskStatus::Stopped).await;
         tracing::info!(task = %self.config.name, "Task stopped");
         Ok(())
     }
 
-    fn graceful_terminate(pid: u32) {
+    fn graceful_terminate(&mut self, pid: u32) {
+        #[cfg(windows)]
+        {
+            if let Some(ref mut input) = self.pty_input {
+                use std::io::Write;
+                let _ = input.write_all(b"\x03");
+                return;
+            }
+
+            use windows_sys::Win32::System::Console::{GenerateConsoleCtrlEvent, CTRL_BREAK_EVENT};
+            let sent = unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid) };
+            if sent == 0 {
+                Self::run_taskkill(&["/T", "/PID", &pid.to_string()]);
+            }
+        }
         #[cfg(unix)]
         {
             let _ = nix::sys::signal::killpg(
                 nix::unistd::Pid::from_raw(pid as i32),
                 nix::sys::signal::Signal::SIGTERM,
             );
-        }
-        #[cfg(windows)]
-        {
-            use windows_sys::Win32::System::Console::{GenerateConsoleCtrlEvent, CTRL_BREAK_EVENT};
-            // CTRL_BREAK_EVENT works for console apps started with CREATE_NEW_PROCESS_GROUP.
-            // Falls back to taskkill (WM_CLOSE) for GUI apps or if the event fails.
-            let sent = unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid) };
-            if sent == 0 {
-                Self::run_taskkill(&["/T", "/PID", &pid.to_string()]);
-            }
         }
     }
 
@@ -166,6 +237,10 @@ impl TaskRunner {
             .status();
     }
 
+    // ------------------------------------------------------------------
+    // Restart / status
+    // ------------------------------------------------------------------
+
     #[allow(dead_code)]
     pub async fn restart(&mut self) -> anyhow::Result<()> {
         self.stop().await?;
@@ -175,6 +250,10 @@ impl TaskRunner {
     pub fn is_running(&self) -> bool {
         self.exit_monitor.as_ref().is_some_and(|h| !h.is_finished())
     }
+
+    // ------------------------------------------------------------------
+    // Exit monitor (pipe mode)
+    // ------------------------------------------------------------------
 
     fn spawn_exit_monitor(&mut self, mut child: Child) {
         let name = self.config.name.clone();
@@ -201,74 +280,49 @@ impl TaskRunner {
                 }
             };
 
-            if exit_code != Some(0) {
-                let msg = match exit_code {
-                    Some(code) => {
-                        format!("Process exited with code {} {}", code, exit_code_hint(code))
-                    }
-                    None => "Process terminated (unknown exit code)".to_string(),
-                };
-                let _ = event_tx
-                    .send(ProcessEvent::LogLine {
-                        task_name: name.clone(),
-                        line: msg,
-                        is_stderr: true,
-                    })
-                    .await;
-            }
-
-            let task_status = match exit_code {
-                Some(0) => TaskStatus::Stopped,
-                code => TaskStatus::Failed { exit_code: code },
-            };
-
-            let _ = event_tx
-                .send(ProcessEvent::StatusChanged {
-                    task_name: name.clone(),
-                    status: task_status,
-                })
-                .await;
-
-            let _ = event_tx
-                .send(ProcessEvent::ProcessExited {
-                    task_name: name.clone(),
-                    exit_code,
-                })
-                .await;
-
+            send_exit_events(&event_tx, &name, exit_code).await;
             (name, exit_code)
         });
 
         self.exit_monitor = Some(handle);
     }
 
-    fn build_command(&self) -> tokio::process::Command {
-        let (shell, flag) = if cfg!(target_os = "windows") {
-            ("cmd", "/C")
-        } else {
-            ("sh", "-c")
-        };
+    // ------------------------------------------------------------------
+    // Exit monitor (ConPTY mode)
+    // ------------------------------------------------------------------
 
-        let mut cmd = tokio::process::Command::new(shell);
-        cmd.arg(flag).arg(&self.config.command);
+    #[cfg(windows)]
+    fn spawn_pty_exit_monitor(&mut self, pty: crate::process::pty::PtyProcess) {
+        let name = self.config.name.clone();
 
-        if let Some(ref dir) = self.config.working_dir {
-            cmd.current_dir(dir);
-        }
+        let handle = tokio::task::spawn_blocking(move || {
+            let exit_code = pty.wait();
+            // `pty` is dropped here → ClosePseudoConsole → output pipe EOF
+            (name, exit_code)
+        });
 
-        // Force line-buffered/unbuffered stdout for common runtimes.
-        // When stdout is piped (not a TTY), many languages default to block
-        // buffering, which prevents log lines from reaching the TUI promptly.
-        cmd.env("PYTHONUNBUFFERED", "1");
+        let event_tx_for_exit = self.event_tx.clone();
+        let task_name_for_exit = self.config.name.clone();
 
-        if let Some(ref env_vars) = self.config.env {
-            for (key, value) in env_vars {
-                cmd.env(key, value);
-            }
-        }
+        let wrapped = tokio::spawn(async move {
+            let result = handle.await;
+            let (name, exit_code) = match result {
+                Ok(pair) => pair,
+                Err(e) => {
+                    tracing::error!(task = %task_name_for_exit, error = %e, "PTY exit monitor panicked");
+                    (task_name_for_exit, None)
+                }
+            };
+            send_exit_events(&event_tx_for_exit, &name, exit_code).await;
+            (name, exit_code)
+        });
 
-        cmd
+        self.exit_monitor = Some(wrapped);
     }
+
+    // ------------------------------------------------------------------
+    // Log readers
+    // ------------------------------------------------------------------
 
     fn spawn_log_reader<R>(&mut self, reader: R, is_stderr: bool)
     where
@@ -293,17 +347,74 @@ impl TaskRunner {
         self.log_tasks.push(handle);
     }
 
+    /// Read lines from the ConPTY output pipe in a blocking thread.
+    /// ANSI escape codes are stripped since the TUI renders its own styles.
+    #[cfg(windows)]
+    fn spawn_pty_log_reader(&mut self, output: std::fs::File) {
+        let event_tx = self.event_tx.clone();
+        let task_name = self.config.name.clone();
+
+        let handle = tokio::task::spawn_blocking(move || {
+            use std::io::{BufRead, BufReader};
+
+            let reader = BufReader::new(output);
+            for line in reader.lines() {
+                let line = match line {
+                    Ok(l) => l,
+                    Err(_) => break,
+                };
+                let cleaned = strip_ansi(&line);
+                if cleaned.is_empty() {
+                    continue;
+                }
+                // blocking_send is fine inside spawn_blocking
+                let _ = event_tx.blocking_send(ProcessEvent::LogLine {
+                    task_name: task_name.clone(),
+                    line: cleaned,
+                    is_stderr: false,
+                });
+            }
+        });
+
+        self.log_tasks.push(handle);
+    }
+
+    // ------------------------------------------------------------------
+    // Cleanup & helpers
+    // ------------------------------------------------------------------
+
     async fn cleanup_log_tasks(&mut self) {
-        // After the process exits, the pipe write-ends are closed and
-        // the log readers will reach EOF shortly. Give them time to
-        // drain any remaining buffered output (e.g. shutdown messages)
-        // rather than aborting immediately.
         let handles: Vec<_> = self.log_tasks.drain(..).collect();
         let _ = tokio::time::timeout(
             Duration::from_millis(500),
             futures::future::join_all(handles),
         )
         .await;
+    }
+
+    fn build_command(&self) -> tokio::process::Command {
+        let (shell, flag) = if cfg!(target_os = "windows") {
+            ("cmd", "/C")
+        } else {
+            ("sh", "-c")
+        };
+
+        let mut cmd = tokio::process::Command::new(shell);
+        cmd.arg(flag).arg(&self.config.command);
+
+        if let Some(ref dir) = self.config.working_dir {
+            cmd.current_dir(dir);
+        }
+
+        cmd.env("PYTHONUNBUFFERED", "1");
+
+        if let Some(ref env_vars) = self.config.env {
+            for (key, value) in env_vars {
+                cmd.env(key, value);
+            }
+        }
+
+        cmd
     }
 
     async fn send_status(&self, status: TaskStatus) {
@@ -328,18 +439,66 @@ impl TaskRunner {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+async fn send_exit_events(
+    event_tx: &mpsc::Sender<ProcessEvent>,
+    name: &str,
+    exit_code: Option<i32>,
+) {
+    if exit_code != Some(0) {
+        let msg = match exit_code {
+            Some(code) => format!("Process exited with code {} {}", code, exit_code_hint(code)),
+            None => "Process terminated (unknown exit code)".to_string(),
+        };
+        let _ = event_tx
+            .send(ProcessEvent::LogLine {
+                task_name: name.to_owned(),
+                line: msg,
+                is_stderr: true,
+            })
+            .await;
+    }
+
+    let task_status = match exit_code {
+        Some(0) => TaskStatus::Stopped,
+        code => TaskStatus::Failed { exit_code: code },
+    };
+
+    let _ = event_tx
+        .send(ProcessEvent::StatusChanged {
+            task_name: name.to_owned(),
+            status: task_status,
+        })
+        .await;
+
+    let _ = event_tx
+        .send(ProcessEvent::ProcessExited {
+            task_name: name.to_owned(),
+            exit_code,
+        })
+        .await;
+}
+
 fn exit_code_hint(code: i32) -> &'static str {
     match code {
-        // Windows-specific exit codes
         9009 => "(command not found — check that the program is installed and in PATH)",
         3 => "(path not found)",
         5 => "(access denied)",
-        // Unix signals (128 + signal number)
         130 => "(interrupted by Ctrl+C / SIGINT)",
         137 => "(killed / SIGKILL)",
         143 => "(terminated / SIGTERM)",
         _ => "",
     }
+}
+
+/// Strip ANSI escape sequences from ConPTY output.
+#[cfg(windows)]
+fn strip_ansi(input: &str) -> String {
+    let bytes = strip_ansi_escapes::strip(input);
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 impl Drop for TaskRunner {

@@ -98,6 +98,7 @@ lnch/
 │   │   ├── mod.rs             # モジュール公開定義
 │   │   ├── manager.rs         # ProcessManager（全タスクの統括）
 │   │   ├── task_runner.rs     # 個別タスクの起動・停止・IO
+│   │   ├── pty.rs             # Windows ConPTY ラッパー (Windows のみ)
 │   │   ├── dependency.rs      # depends_on の解決（トポロジカルソート）
 │   │   └── signal.rs          # シグナルハンドリング・クリーンアップ
 │   ├── tui/
