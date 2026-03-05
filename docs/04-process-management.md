@@ -227,7 +227,44 @@ tasks:
 
 ---
 
-## 5. プロセスグループ管理
+## 5. ConPTY によるプロセス起動 (Windows)
+
+### 背景
+
+`Stdio::piped()` で子プロセスの stdout/stderr をキャプチャすると、ハンドルは**匿名パイプ**になる。
+Windows で子プロセスが `multiprocessing.spawn`（Python）などを使い `bInheritHandles=FALSE` で孫プロセスを生成した場合、パイプハンドルは孫プロセスに継承されず `OSError: [Errno 22] Invalid argument` が発生する。
+
+一方、**コンソールハンドル（疑似ハンドル）** は同じコンソールに接続された全プロセスで自動的に有効であり、明示的なハンドル継承を必要としない。
+
+### ConPTY の仕組み
+
+Windows 10 version 1809 以降で利用可能な ConPTY（Pseudo Console）API を使い、子プロセスに仮想コンソールを提供する。
+
+```
+lnch (TUI)
+ └─ [ConPTY (仮想コンソール)]
+      ├─ 出力パイプ → lnch が読み取って TUI に表示
+      ├─ 入力パイプ → Ctrl+C 送信用に保持
+      └─ コンソール側 → 子プロセスが接続
+           └─ uvicorn メインプロセス (stdout/stderr = コンソールハンドル)
+                └─ ワーカープロセス (コンソールハンドルは継承不要で有効) ✓
+```
+
+### 実装
+
+- `src/process/pty.rs` — `PtyProcess` が ConPTY のライフサイクルを管理
+- `TaskRunner::start()` は Windows でまず ConPTY モード（`start_with_pty()`）を試行し、失敗時は従来の pipe モード（`start_with_pipes()`）にフォールバック
+- ConPTY の出力パイプは `tokio::task::spawn_blocking` 内でブロッキング読み取りを行う
+- 出力に含まれる ANSI エスケープシーケンスは `strip-ansi-escapes` クレートで除去
+
+### 制約
+
+- **stdout/stderr の区別不可**: ConPTY は単一のストリームに統合するため、全出力が stdout として扱われる
+- **Windows 10 1809 以降が必要**: ConPTY 非対応環境では自動的に pipe モードにフォールバック
+
+---
+
+## 6. プロセスグループ管理
 
 ゾンビプロセスの発生を防ぐため、各タスクのプロセスは**新しいプロセスグループ**で起動する。
 
@@ -257,29 +294,34 @@ fn kill_process_group(pid: u32) {
 
 ### Windows
 
+**pipe モード**（フォールバック時）:
+
 ```rust
 use windows_sys::Win32::System::Threading::*;
 
 fn configure_process_group(cmd: &mut Command) {
     cmd.creation_flags(CREATE_NEW_PROCESS_GROUP);
 }
-
-fn kill_process_group(pid: u32) {
-    // Job Object を使用してプロセスツリー全体を終了
-}
 ```
+
+**ConPTY モード**（デフォルト）:
+
+ConPTY モードでは仮想コンソールがプロセスグループの役割を果たすため、`CREATE_NEW_PROCESS_GROUP` は不要。`ClosePseudoConsole` により ConHost がプロセスツリーのクリーンアップを行う。
 
 ---
 
-## 6. グレースフルシャットダウン
+## 7. グレースフルシャットダウン
 
 ### タスク停止フロー
 
 ```
-1. SIGTERM（Unix）/ CTRL_BREAK_EVENT（Windows）をプロセスグループに送信
+1. シグナル送信:
+   - Unix: SIGTERM をプロセスグループに送信
+   - Windows (ConPTY モード): Ctrl+C (\x03) を ConPTY 入力パイプに書き込み
+   - Windows (pipe モード): CTRL_BREAK_EVENT をプロセスグループに送信
 2. 最大 5 秒間、プロセスの終了を待機
 3. タイムアウトした場合:
-   a. SIGKILL（Unix）/ TerminateProcess（Windows）を送信
+   a. SIGKILL（Unix）/ taskkill /F /T（Windows）を送信
    b. 1 秒間待機
    c. プロセスの終了を確認
 4. ステータスを Stopped に更新
@@ -305,7 +347,7 @@ Ctrl+C / SIGTERM 受信
 
 ---
 
-## 7. シグナルハンドリング
+## 8. シグナルハンドリング
 
 **責務**: アプリケーション終了時の安全なクリーンアップ
 
