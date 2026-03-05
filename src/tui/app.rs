@@ -149,19 +149,18 @@ impl App {
         loop {
             terminal.draw(|frame| ui::render(frame, &self.state))?;
 
+            // Wait for at least one event
             match app_event_rx.recv().await {
-                Some(AppEvent::Key(key)) => {
-                    tracing::debug!(key = ?key, "Key event received");
-                    self.handle_key(key).await;
-                }
-                Some(AppEvent::Tick) => {}
-                Some(AppEvent::Process(event)) => {
-                    self.handle_process_event(event);
-                }
+                Some(event) => self.handle_app_event(event).await,
                 None => {
                     tracing::warn!("App event channel closed, exiting");
                     break;
                 }
+            }
+
+            // Drain all pending events before redrawing
+            while let Ok(event) = app_event_rx.try_recv() {
+                self.handle_app_event(event).await;
             }
 
             if self.state.should_quit {
@@ -173,6 +172,19 @@ impl App {
         }
 
         Ok(())
+    }
+
+    async fn handle_app_event(&mut self, event: AppEvent) {
+        match event {
+            AppEvent::Key(key) => {
+                tracing::debug!(key = ?key, "Key event received");
+                self.handle_key(key).await;
+            }
+            AppEvent::Tick => {}
+            AppEvent::Process(event) => {
+                self.handle_process_event(event);
+            }
+        }
     }
 
     async fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
