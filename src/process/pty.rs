@@ -22,7 +22,7 @@ use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
     CreateProcessW, GetExitCodeProcess, InitializeProcThreadAttributeList,
     TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject, EXTENDED_STARTUPINFO_PRESENT,
-    LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION, STARTUPINFOEXW,
+    LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION, STARTUPINFOEXW, STARTF_USESTDHANDLES,
 };
 
 const PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE: usize = 0x00020016;
@@ -119,6 +119,14 @@ impl PtyProcess {
         let mut si_ex: STARTUPINFOEXW = mem::zeroed();
         si_ex.StartupInfo.cb = mem::size_of::<STARTUPINFOEXW>() as u32;
         si_ex.lpAttributeList = attr_list;
+        // Setting STARTF_USESTDHANDLES with INVALID_HANDLE_VALUE prevents the
+        // child from inheriting the parent's real console handles.  Without
+        // this, cmd.exe ignores the ConPTY and writes directly to the parent's
+        // console when the calling process itself has a real console attached.
+        si_ex.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+        si_ex.StartupInfo.hStdInput = INVALID_HANDLE_VALUE;
+        si_ex.StartupInfo.hStdOutput = INVALID_HANDLE_VALUE;
+        si_ex.StartupInfo.hStdError = INVALID_HANDLE_VALUE;
 
         // --- Build command line: cmd.exe /C <command> ---
         let cmd_line = format!("cmd.exe /C {}", command);

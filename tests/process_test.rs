@@ -51,16 +51,46 @@ async fn test_log_capture() {
 
     runner.start().await.unwrap();
 
-    // Wait for the process to finish and logs to arrive
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
+    // Poll events with a timeout, looking for the log line or process exit.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     let mut found_hello = false;
-    while let Ok(event) = event_rx.try_recv() {
-        if let ProcessEvent::LogLine { line, .. } = event {
-            if line.contains("hello") {
-                found_hello = true;
-            }
+    let mut process_exited = false;
+    let mut received: Vec<String> = Vec::new();
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            break;
         }
+        match tokio::time::timeout(remaining, event_rx.recv()).await {
+            Ok(Some(ProcessEvent::LogLine { line, .. })) => {
+                received.push(format!("LogLine: {:?}", line));
+                if line.contains("hello") {
+                    found_hello = true;
+                    break;
+                }
+            }
+            Ok(Some(ProcessEvent::ProcessExited { exit_code, .. })) => {
+                received.push(format!("ProcessExited({:?})", exit_code));
+                process_exited = true;
+                // Process done; drain any remaining buffered events.
+                while let Ok(event) = event_rx.try_recv() {
+                    if let ProcessEvent::LogLine { line, .. } = event {
+                        received.push(format!("LogLine(drain): {:?}", line));
+                        if line.contains("hello") {
+                            found_hello = true;
+                        }
+                    }
+                }
+                break;
+            }
+            Ok(Some(event)) => {
+                received.push(format!("Other: {:?}", event));
+            }
+            Ok(None) | Err(_) => break,
+        }
+    }
+    if !found_hello {
+        eprintln!("process_exited={process_exited}, events={received:#?}");
     }
     assert!(found_hello, "Should have captured 'hello' in logs");
 }

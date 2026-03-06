@@ -17,7 +17,7 @@ A TUI multi-process launcher for your dev environment — manage all your local 
 │  ○ worker    [stop] │                                               │
 │                     │                                               │
 ├─────────────────────┴───────────────────────────────────────────────┤
-│ [a] All Start  [s] Start/Stop  [r] Restart  [↑↓] Select  [q] Quit  │
+│ [a] All Start  [s] Start/Stop  [r] Restart  [↑↓] Select  [c] Clear  [q] Quit  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -123,6 +123,7 @@ lnch --help              # Show help
 | `PageDown` | Scroll logs down |
 | `Home` | Scroll to top of logs |
 | `End` | Scroll to bottom (resume auto-scroll) |
+| `c` | Clear logs of selected task |
 | `q` / `Ctrl+C` | Quit (graceful shutdown) |
 
 ## Configuration

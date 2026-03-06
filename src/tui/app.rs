@@ -232,6 +232,8 @@ impl App {
                 self.snap_scroll_to_bottom();
             }
 
+            KeyCode::Char('c') => self.clear_selected_log(),
+
             _ => {}
         }
     }
@@ -321,6 +323,14 @@ impl App {
     fn reset_scroll(&mut self) {
         self.state.auto_scroll = true;
         self.snap_scroll_to_bottom();
+    }
+
+    fn clear_selected_log(&mut self) {
+        if let Some(task) = self.state.tasks.get_mut(self.state.selected_index) {
+            task.log_buffer.clear();
+            self.state.log_scroll_offset = 0;
+            self.state.auto_scroll = true;
+        }
     }
 
     fn selected_task_name(&self) -> String {
