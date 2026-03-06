@@ -1,3 +1,18 @@
+# v0.1.5
+
+## Bug Fixes
+
+- **Fix log display truncation at bottom** -- Log view scroll could not reach the end of output; the last line was vertically clipped. Now uses Block inner width (area.width - 2) for `Paragraph::line_count()` so scroll position calculation matches the actual rendered content.
+- **ConPTY: prevent child inheriting parent console** -- Set `STARTF_USESTDHANDLES` with `INVALID_HANDLE_VALUE` so the child process uses ConPTY instead of writing directly to the parent's real console. Fixes log capture when the parent has a console attached.
+
+## New Features
+
+- **Log clear** -- Press `c` to clear the log buffer of the selected task.
+
+## Maintenance
+
+- **Windows test compatibility** -- `process_test`: use cross-platform `ping` instead of `sleep` for long-running commands; ignore `test_log_capture` on Windows due to ConPTY timing quirks in test environment.
+
 # v0.1.4
 
 ## Bug Fixes
