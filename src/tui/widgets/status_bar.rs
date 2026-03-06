@@ -11,6 +11,8 @@ pub fn render_status_bar(frame: &mut Frame, area: Rect) {
         Span::raw(" Restart  "),
         Span::styled("[↑↓]", Style::default().fg(Color::Yellow).bold()),
         Span::raw(" Select  "),
+        Span::styled("[c]", Style::default().fg(Color::Yellow).bold()),
+        Span::raw(" Clear  "),
         Span::styled("[q]", Style::default().fg(Color::Yellow).bold()),
         Span::raw(" Quit"),
     ]);

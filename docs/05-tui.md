@@ -16,7 +16,7 @@
 │                     │                                               │
 │                     │                                               │
 ├─────────────────────┴───────────────────────────────────────────────┤
-│ [a] All Start  [s] Start/Stop  [r] Restart  [↑↓] Select  [q] Quit  │
+│ [a] All Start  [s] Start/Stop  [r] Restart  [↑↓] Select  [c] Clear  [q] Quit  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -78,7 +78,7 @@ fn render(frame: &mut Frame, state: &AppState) {
 キーバインドのヘルプを常時表示:
 
 ```
-[a] All Start  [s] Start/Stop  [r] Restart  [↑↓] Select  [q] Quit
+[a] All Start  [s] Start/Stop  [r] Restart  [↑↓] Select  [c] Clear  [q] Quit
 ```
 
 ---
@@ -98,6 +98,7 @@ fn render(frame: &mut Frame, state: &AppState) {
 | `PageDown` | ログを下にスクロール | 常時 |
 | `Home` | ログの先頭へ | 常時 |
 | `End` | ログの末尾へ（自動スクロール再開） | 常時 |
+| `c` | 選択タスクのログをクリア | 常時 |
 
 ---
 
