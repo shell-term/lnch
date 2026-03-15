@@ -1,25 +1,20 @@
+<div align="center">
+
 # lnch
 
-> **One YAML. One command. All your services.**
+**One YAML. One command. All your services.**
+
+[![Crates.io](https://img.shields.io/crates/v/lnch)](https://crates.io/crates/lnch)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](https://github.com/shell-term/lnch/releases)
 
 A TUI multi-process launcher for your dev environment — manage all your local servers and commands from a single terminal.
 
-**English** | [日本語](README.ja.md)
+![demo](assets/lnch.gif)
 
-```
-┌─ lnch: my-project ─────────────────────────────────────────────────┐
-│                                                                     │
-│  Tasks              │  Logs: [frontend]                             │
-│  ─────              │  ───────────────────────────────────────────  │
-│  ● frontend  [3000] │  ▶ ready - started server on 0.0.0.0:3000    │
-│  ● backend   [8080] │  ▶ compiled client and server successfully    │
-│  ● database         │  ▶ watching for file changes...               │
-│  ○ worker    [stop] │                                               │
-│                     │                                               │
-├─────────────────────┴───────────────────────────────────────────────┤
-│ [a] All Start  [s] Start/Stop  [r] Restart  [↑↓] Select  [c] Clear  [q] Quit  │
-└─────────────────────────────────────────────────────────────────────┘
-```
+</div>
+
+**English** | [日本語](README.ja.md)
 
 ## Features
 
