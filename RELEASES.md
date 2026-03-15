@@ -1,3 +1,14 @@
+# v0.1.6
+
+## New Features
+
+- **Fullstack example** -- Added `examples/fullstack/` demonstrating a real-world setup: FastAPI + Celery worker + React (Vite), managed with `uv`. Services start in dependency order (`redis` → `backend` + `worker` → `frontend`).
+
+## Documentation
+
+- **Demo GIF and badges** -- Added demo GIF and crates.io / license / platform badges to `README.md` and `README.ja.md`.
+- **Reorganize examples** -- Moved existing examples into `examples/simple/` and `examples/simple-windows/` subdirectories.
+
 # v0.1.5
 
 ## Bug Fixes

@@ -1,25 +1,20 @@
+<div align="center">
+
 # lnch
 
-> **One YAML. One command. All your services.**
+**One YAML. One command. All your services.**
+
+[![Crates.io](https://img.shields.io/crates/v/lnch)](https://crates.io/crates/lnch)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](https://github.com/shell-term/lnch/releases)
 
 開発環境のマルチプロセスランチャー TUI — ローカルサーバーやコマンドをひとつのターミナルで一括管理。
 
-[English](README.md) | **日本語**
+![demo](assets/lnch.gif)
 
-```
-┌─ lnch: my-project ─────────────────────────────────────────────────┐
-│                                                                     │
-│  Tasks              │  Logs: [frontend]                             │
-│  ─────              │  ───────────────────────────────────────────  │
-│  ● frontend  [3000] │  ▶ ready - started server on 0.0.0.0:3000    │
-│  ● backend   [8080] │  ▶ compiled client and server successfully    │
-│  ● database         │  ▶ watching for file changes...               │
-│  ○ worker    [stop] │                                               │
-│                     │                                               │
-├─────────────────────┴───────────────────────────────────────────────┤
-│ [a] All Start  [s] Start/Stop  [r] Restart  [↑↓] Select  [c] Clear  [q] Quit  │
-└─────────────────────────────────────────────────────────────────────┘
-```
+</div>
+
+[English](README.md) | **日本語**
 
 ## 特徴
 

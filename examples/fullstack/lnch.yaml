@@ -1,0 +1,26 @@
+name: my-app
+tasks:
+  - name: redis
+    command: "redis-server --loglevel notice"
+    color: red
+
+  - name: backend
+    command: "uv run uvicorn main:app --reload --port 8000"
+    working_dir: "./backend"
+    color: green
+    depends_on:
+      - redis
+
+  - name: worker
+    command: "uv run celery -A tasks worker --loglevel=info --concurrency=2"
+    working_dir: "./backend"
+    color: yellow
+    depends_on:
+      - redis
+
+  - name: frontend
+    command: "npm run dev"
+    working_dir: "./frontend"
+    color: cyan
+    depends_on:
+      - backend
