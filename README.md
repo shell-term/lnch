@@ -25,6 +25,7 @@ A TUI multi-process launcher for your dev environment — manage all your local 
 - **Per-task logs** — stdout/stderr captured in ring buffers with color-coded display
 - **Graceful shutdown** — SIGTERM with timeout, then SIGKILL; process groups ensure no orphan processes
 - **Cross-platform** — macOS, Linux (including WSL), and Windows
+- **Update notifications** — Automatically checks for new releases on startup; press `u` to install the update directly from the TUI
 
 ## Installation
 
@@ -119,6 +120,7 @@ lnch --help              # Show help
 | `Home` | Scroll to top of logs |
 | `End` | Scroll to bottom (resume auto-scroll) |
 | `c` | Clear logs of selected task |
+| `u` | Update lnch (shown when a new version is available) |
 | `q` / `Ctrl+C` | Quit (graceful shutdown) |
 
 ## Configuration

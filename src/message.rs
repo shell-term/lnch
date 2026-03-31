@@ -1,5 +1,7 @@
 use crossterm::event::KeyEvent;
 
+use crate::update::checker::UpdateInfo;
+
 /// Runtime status of a task
 #[derive(Debug, Clone, PartialEq)]
 pub enum TaskStatus {
@@ -46,4 +48,5 @@ pub enum AppEvent {
     Key(KeyEvent),
     Tick,
     Process(ProcessEvent),
+    UpdateAvailable(UpdateInfo),
 }

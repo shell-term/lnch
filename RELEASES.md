@@ -1,3 +1,12 @@
+# v0.1.8
+
+## New Features
+
+- **Update notifications** -- lnch now checks for new releases on startup via the GitHub Releases API. When a newer version is detected, the title bar and status bar display a notification. Press `u` to install the update directly from the TUI — lnch exits, runs the platform-appropriate installer (shell or PowerShell), and displays a restart notice upon completion.
+  - Background check: non-blocking, does not delay TUI startup.
+  - Cache: results are cached for 24 hours in `~/.cache/lnch/update_check.json` to minimize API calls.
+  - Opt-out: set `LNCH_NO_UPDATE_CHECK=1` to disable the check entirely.
+
 # v0.1.7
 
 ## New Features

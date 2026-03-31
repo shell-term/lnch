@@ -75,11 +75,20 @@ fn render(frame: &mut Frame, state: &AppState) {
 
 ### ステータスバー（最下段）
 
-キーバインドのヘルプを常時表示:
+キーバインドのヘルプを常時表示。新バージョンが検出された場合は `[u] Update` が追加される:
 
 ```
-[a] All Start  [s] Start/Stop  [r] Restart  [↑↓] Select  [c] Clear  [q] Quit
+[a] All Start  [s] Start/Stop  [r] Restart  [↑↓] Select  [c] Clear  [u] Update  [q] Quit
 ```
+
+### アップデート通知
+
+起動時にバックグラウンドで GitHub Releases API をチェックし、新バージョンがある場合にタイトルバー右側とステータスバーに通知を表示する。
+
+- **チェックタイミング**: 起動時（非同期、TUI起動をブロックしない）
+- **キャッシュ**: `~/.cache/lnch/update_check.json`（24時間TTL）で API 呼び出しを最小化
+- **`[u]` キー**: TUI を終了し、プラットフォームに応じたインストーラー（`shell` / `powershell`）を実行。完了後に再起動を促すメッセージを表示
+- **オプトアウト**: 環境変数 `LNCH_NO_UPDATE_CHECK=1` で無効化
 
 ---
 
@@ -99,6 +108,7 @@ fn render(frame: &mut Frame, state: &AppState) {
 | `Home` | ログの先頭へ | 常時 |
 | `End` | ログの末尾へ（自動スクロール再開） | 常時 |
 | `c` | 選択タスクのログをクリア | 常時 |
+| `u` | lnch をアップデート | 新バージョン検出時 |
 
 ---
 

@@ -5,6 +5,8 @@ mod log;
 mod message;
 mod process;
 mod tui;
+mod update;
+
 
 use std::sync::Mutex;
 
