@@ -20,8 +20,9 @@ impl UpdateInfo {
     pub fn install_command(&self) -> String {
         let v = &self.latest_version;
         if cfg!(windows) {
+            let ps = find_powershell();
             format!(
-                "powershell -ExecutionPolicy ByPass -c \"irm https://github.com/shell-term/lnch/releases/download/v{v}/lnch-installer.ps1 | iex\""
+                "{ps} -ExecutionPolicy ByPass -c \"irm https://github.com/shell-term/lnch/releases/download/v{v}/lnch-installer.ps1 | iex\""
             )
         } else {
             format!(
@@ -163,6 +164,24 @@ pub async fn check_for_update() -> Option<UpdateInfo> {
     }
 }
 
+/// Return "pwsh" if PowerShell 7+ is on PATH, otherwise "powershell".
+#[cfg(windows)]
+fn find_powershell() -> &'static str {
+    use std::sync::OnceLock;
+    static PS: OnceLock<&str> = OnceLock::new();
+    *PS.get_or_init(|| {
+        match std::process::Command::new("pwsh")
+            .arg("-Version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+        {
+            Ok(s) if s.success() => "pwsh",
+            _ => "powershell",
+        }
+    })
+}
+
 /// Execute the update installer. Call this after the TUI has been torn down
 /// so that installer output is visible in the terminal.
 pub fn execute_update(info: &UpdateInfo) {
@@ -172,11 +191,12 @@ pub fn execute_update(info: &UpdateInfo) {
     println!();
 
     let status = if cfg!(windows) {
+        let ps = find_powershell();
         let ps_script = format!(
             "irm https://github.com/shell-term/lnch/releases/download/v{}/lnch-installer.ps1 | iex",
             info.latest_version
         );
-        std::process::Command::new("powershell")
+        std::process::Command::new(ps)
             .args(["-ExecutionPolicy", "ByPass", "-Command", &ps_script])
             .status()
     } else {
@@ -241,7 +261,10 @@ mod tests {
         let cmd = info.install_command();
         assert!(cmd.contains("0.2.0"), "command should contain version");
         if cfg!(windows) {
-            assert!(cmd.contains("powershell"));
+            assert!(
+                cmd.contains("pwsh") || cmd.contains("powershell"),
+                "command should contain pwsh or powershell"
+            );
             assert!(cmd.contains(".ps1"));
         } else {
             assert!(cmd.contains("curl"));
