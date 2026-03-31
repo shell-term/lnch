@@ -1,3 +1,9 @@
+# v0.1.9
+
+## New Features
+
+- **Log view scrollbar and position indicator** -- When log content exceeds the visible area, a scrollbar with `↑`/`↓` arrows is displayed on the right edge. The current scroll position is shown as a line range indicator (e.g. `1-25/150`) at the bottom-right corner of the log panel.
+
 # v0.1.8
 
 ## New Features
