@@ -162,6 +162,7 @@ mod tests {
             env: None,
             color: None,
             depends_on: deps.map(|d| d.into_iter().map(String::from).collect()),
+            ready_check: None,
         }
     }
 

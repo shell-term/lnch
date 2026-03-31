@@ -1,3 +1,12 @@
+# v0.1.7
+
+## New Features
+
+- **Readiness checks for dependency ordering** -- `depends_on` now actually waits for dependencies to become ready before starting dependent tasks. Previously, tasks were spawned nearly simultaneously regardless of dependency order.
+  - **Smart defaults** (no config needed): one-shot tasks are ready when they exit successfully; long-running tasks are ready after a 2-second grace period.
+  - **Explicit `ready_check` configuration**: `tcp` (port connection), `http` (HTTP endpoint), `log_line` (stdout/stderr pattern match), `exit` (process exit with code 0).
+  - Configurable `timeout` (default: 30s) and `interval` (default: 500ms). On timeout, a warning is logged and startup continues.
+
 # v0.1.6
 
 ## New Features

@@ -17,6 +17,10 @@ tasks:
     color: green                # Optional: enum (後述)
     depends_on:                 # Optional: list<string>（タスク名の参照）
       - database
+    ready_check:               # Optional: object（依存関係の準備完了チェック）
+      tcp: { port: 5432 }     # tcp / http / log_line / exit のいずれか1つ
+      timeout: 30              # Optional: タイムアウト秒数（デフォルト: 30）
+      interval: 500            # Optional: ポーリング間隔ミリ秒（デフォルト: 500）
 ```
 
 ## 2. フィールド詳細
@@ -31,6 +35,7 @@ tasks:
 | `tasks[].env` | `map<string, string>` | ❌ | `{}` | 追加の環境変数（親プロセスの環境変数を継承した上で上書き） |
 | `tasks[].color` | `string` | ❌ | 自動割当 | タスクのテーマカラー |
 | `tasks[].depends_on` | `list<string>` | ❌ | `[]` | 先に起動すべきタスク名のリスト |
+| `tasks[].ready_check` | `ReadyCheckConfig` | ❌ | スマートデフォルト | 依存関係の準備完了チェック設定 |
 
 ## 3. カラー定義
 
@@ -100,7 +105,30 @@ pub struct TaskConfig {
     pub env: Option<HashMap<String, String>>,
     pub color: Option<String>,
     pub depends_on: Option<Vec<String>>,
+    pub ready_check: Option<ReadyCheckConfig>,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct ReadyCheckConfig {
+    pub tcp: Option<TcpCheck>,
+    pub http: Option<HttpCheck>,
+    pub log_line: Option<LogLineCheck>,
+    pub exit: Option<ExitCheck>,
+    pub timeout: Option<u64>,    // 秒（デフォルト: 30）
+    pub interval: Option<u64>,   // ミリ秒（デフォルト: 500）
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TcpCheck { pub port: u16 }
+
+#[derive(Debug, Deserialize)]
+pub struct HttpCheck { pub url: String, pub status: Option<u16> }
+
+#[derive(Debug, Deserialize)]
+pub struct LogLineCheck { pub pattern: String }
+
+#[derive(Debug, Deserialize)]
+pub struct ExitCheck {}
 ```
 
 ## 7. ランタイム状態モデル
@@ -252,3 +280,6 @@ pub fn load_config(path: &Path) -> anyhow::Result<LnchConfig> {
 | 4 | `depends_on` に循環がないこと | `"Circular dependency detected: {cycle}"` |
 | 5 | `color` が有効な値であること | `"Invalid color '{color}' for task '{name}'"` |
 | 6 | `working_dir` が存在するディレクトリであること | `"Working directory does not exist: '{dir}'"` |
+| 7 | `ready_check` のチェック種類が1つだけ指定されていること | `"ready_check must specify exactly one of: tcp, http, log_line, exit"` |
+| 8 | `ready_check.http.url` が空でないこと | `"ready_check http url must not be empty"` |
+| 9 | `ready_check.log_line.pattern` が空でないこと | `"ready_check log_line pattern must not be empty"` |

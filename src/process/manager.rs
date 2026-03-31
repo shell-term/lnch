@@ -90,11 +90,58 @@ impl ProcessManager {
 
     async fn start_all(&mut self) {
         let groups = self.dependency_graph.topological_sort();
-        for group in groups {
+        let total_groups = groups.len();
+
+        for (group_idx, group) in groups.into_iter().enumerate() {
             for name in &group {
                 self.start_task(name).await;
             }
+
+            // Skip readiness wait for the last group (nothing depends on it)
+            if group_idx >= total_groups - 1 {
+                break;
+            }
+
+            // Wait for all tasks in this group to become ready
+            self.wait_for_group_ready(&group).await;
         }
+    }
+
+    async fn wait_for_group_ready(&self, group: &[String]) {
+        let futures: Vec<_> = group
+            .iter()
+            .filter_map(|name| {
+                self.runners.get(name).map(|runner| {
+                    let name = name.clone();
+                    let event_tx = self.event_tx.clone();
+                    async move {
+                        let result = runner.wait_ready().await;
+                        match &result {
+                            crate::process::ready::ReadyResult::Ready => {
+                                tracing::info!(task = %name, "Task is ready");
+                            }
+                            crate::process::ready::ReadyResult::TimedOut => {
+                                tracing::warn!(task = %name, "Readiness check timed out, continuing");
+                                let _ = event_tx
+                                    .send(ProcessEvent::LogLine {
+                                        task_name: name.clone(),
+                                        line: "[lnch] Readiness check timed out, continuing..."
+                                            .to_string(),
+                                        is_stderr: true,
+                                    })
+                                    .await;
+                            }
+                            crate::process::ready::ReadyResult::Failed => {
+                                tracing::error!(task = %name, "Task failed during readiness check");
+                            }
+                        }
+                        result
+                    }
+                })
+            })
+            .collect();
+
+        futures::future::join_all(futures).await;
     }
 
     async fn stop_all(&mut self) {

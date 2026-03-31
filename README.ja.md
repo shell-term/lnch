@@ -20,7 +20,7 @@
 
 - **1つのYAML、1つのコマンド** — `lnch.yaml` にサービスを定義し、`lnch` で一括起動
 - **TUI ダッシュボード** — [ratatui](https://github.com/ratatui/ratatui) による分割ペインでプロセスの状態とログをリアルタイム監視
-- **依存順序制御** — `depends_on` でサービスの起動順序をトポロジカルソートにより自動解決
+- **依存順序制御** — `depends_on` でサービスの起動順序をトポロジカルソートにより自動解決。`ready_check` で依存先の準備完了を待ってから起動
 - **設定ファイル自動検出** — カレントディレクトリから上位に向かって `lnch.yaml` を探索するため、サブディレクトリからでも実行可能
 - **タスクごとのログ** — stdout/stderr をリングバッファに保持し、色分け表示
 - **グレースフルシャットダウン** — SIGTERM → タイムアウト後に SIGKILL。プロセスグループにより孤児プロセスを防止
@@ -135,10 +135,51 @@ lnch --help              # ヘルプ表示
 | `tasks[].env` | `map` | いいえ | `{}` | 環境変数（親プロセスの環境変数を継承し、上書き） |
 | `tasks[].color` | `string` | いいえ | 自動割当 | タスクの色: `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white` |
 | `tasks[].depends_on` | `list` | いいえ | `[]` | 先に起動すべきタスク名のリスト |
+| `tasks[].ready_check` | `object` | いいえ | スマートデフォルト | 依存関係の準備完了チェック（後述） |
 
 ### 設定ファイルの探索
 
 `--config` を指定せずに実行した場合、`lnch` はカレントディレクトリから上位に向かって `lnch.yaml` を探索します（最大10階層）。プロジェクトのどのサブディレクトリからでも `lnch` を実行できます。
+
+### レディネスチェック
+
+`depends_on` を指定したタスクは、依存先が「準備完了」になるまで起動を待機します。デフォルトではスマート判定（一発タスクは正常終了で ready、常駐タスクは2秒のグレースピリオド経過で ready）を使用します。より厳密な制御が必要な場合は `ready_check` を指定できます：
+
+```yaml
+tasks:
+  - name: database
+    command: docker compose up postgres
+    ready_check:
+      tcp: { port: 5432 }     # TCP ポートへの接続を待つ
+      timeout: 60              # タイムアウト秒数（デフォルト: 30）
+
+  - name: migrate
+    command: sqlx migrate run
+    ready_check:
+      exit: {}                 # プロセスの正常終了（exit code 0）を待つ
+
+  - name: backend
+    command: cargo run
+    depends_on: [database, migrate]
+    ready_check:
+      log_line: { pattern: "listening on port" }  # ログ出力のパターンマッチを待つ
+
+  - name: frontend
+    command: npm run dev
+    depends_on: [backend]
+    # ready_check 未指定: スマートデフォルト（常駐プロセスのグレースピリオド）
+```
+
+| チェック種類 | 説明 |
+|-------------|------|
+| `tcp: { port: <N> }` | `127.0.0.1:<port>` へのTCP接続が成功するまで待機 |
+| `http: { url: "<URL>", status: <N> }` | HTTP GET で期待するステータスコード（デフォルト: 200）が返るまで待機。HTTPのみ対応 |
+| `log_line: { pattern: "<text>" }` | stdout/stderr に指定文字列が含まれるまで待機 |
+| `exit: {}` | プロセスがexit code 0で終了するまで待機 |
+
+共通オプション: `timeout`（秒、デフォルト: 30）、`interval`（ミリ秒、デフォルト: 500）
+
+タイムアウト時は警告ログを出力し、次のグループの起動を続行します。
 
 ### コマンドの実行方式
 

@@ -56,14 +56,25 @@ impl ProcessManager {
     }
 
     /// depends_on を考慮した起動順序で全タスクを開始
+    /// 各グループ起動後、ready_check（またはスマートデフォルト）で
+    /// 準備完了を待ってから次のグループを起動する
     async fn start_all(&mut self) {
-        let order = self.dependency_graph.topological_sort();
-        for group in order {
-            let handles: Vec<_> = group.iter()
-                .map(|name| self.start_task(name))
-                .collect();
-            futures::future::join_all(handles).await;
+        let groups = self.dependency_graph.topological_sort();
+        for (idx, group) in groups.iter().enumerate() {
+            for name in group {
+                self.start_task(name).await;
+            }
+            // 最終グループ以外は準備完了を待つ
+            if idx < groups.len() - 1 {
+                self.wait_for_group_ready(group).await;
+            }
         }
+    }
+
+    /// グループ内全タスクの準備完了を並行で待機
+    async fn wait_for_group_ready(&self, group: &[String]) {
+        // 各タスクの wait_ready() を並行実行
+        // タイムアウト時は警告ログを出して続行
     }
 }
 ```
@@ -215,11 +226,17 @@ tasks:
 1. 設定読み込み時に DependencyGraph を構築
 2. 循環依存が検出された場合はエラーで起動中止
 3. StartAll 時:
-   a. トポロジカルソートで起動順序を決定
-   b. 依存のないタスク群を並列起動
-   c. 各タスクのステータスが Running になるのを待機
+   a. トポロジカルソートで起動順序を決定（グループ単位）
+   b. 依存のないタスク群（グループ0）を並列起動
+   c. ready_check に基づいて準備完了を待機:
+      - ready_check 指定あり: tcp / http / log_line / exit チェック
+      - ready_check 未指定（スマートデフォルト）:
+        * プロセスが2秒以内に exit 0 → 一発タスク完了で ready
+        * プロセスが2秒以上生存 → 常駐サービス、grace period 経過で ready
+        * プロセスが2秒以内に異常終了 → failed（警告して続行）
+      - タイムアウト時: 警告ログを出して次グループへ続行
    d. 次の依存レベルのタスク群を並列起動
-   e. 繰り返し
+   e. 繰り返し（最終グループは待機不要）
 4. 個別 Start 時:
    a. 依存先が全て Running であることを確認
    b. 未起動の依存先がある場合、先に起動する

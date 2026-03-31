@@ -1,12 +1,15 @@
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch, Notify};
 
 use crate::config::model::TaskConfig;
 use crate::message::{ProcessEvent, TaskStatus};
+use crate::process::ready::{CheckType, ReadyResult};
 
 pub struct TaskRunner {
     config: TaskConfig,
@@ -16,10 +19,15 @@ pub struct TaskRunner {
     log_tasks: Vec<tokio::task::JoinHandle<()>>,
     #[cfg(windows)]
     pty_input: Option<std::fs::File>,
+    ready_notify: Arc<Notify>,
+    ready_flag: Arc<AtomicBool>,
+    exit_code_tx: watch::Sender<Option<Option<i32>>>,
+    exit_code_rx: watch::Receiver<Option<Option<i32>>>,
 }
 
 impl TaskRunner {
     pub fn new(config: TaskConfig, event_tx: mpsc::Sender<ProcessEvent>) -> Self {
+        let (exit_code_tx, exit_code_rx) = watch::channel(None);
         Self {
             config,
             pid: None,
@@ -28,6 +36,10 @@ impl TaskRunner {
             log_tasks: Vec::new(),
             #[cfg(windows)]
             pty_input: None,
+            ready_notify: Arc::new(Notify::new()),
+            ready_flag: Arc::new(AtomicBool::new(false)),
+            exit_code_tx,
+            exit_code_rx,
         }
     }
 
@@ -41,6 +53,10 @@ impl TaskRunner {
     // ------------------------------------------------------------------
 
     pub async fn start(&mut self) -> anyhow::Result<()> {
+        // Reset readiness state for fresh start / restart
+        self.ready_flag.store(false, Ordering::Release);
+        let _ = self.exit_code_tx.send(None);
+
         self.send_status(TaskStatus::Starting).await;
 
         #[cfg(windows)]
@@ -258,6 +274,7 @@ impl TaskRunner {
     fn spawn_exit_monitor(&mut self, mut child: Child) {
         let name = self.config.name.clone();
         let event_tx = self.event_tx.clone();
+        let exit_code_tx = self.exit_code_tx.clone();
 
         let handle = tokio::spawn(async move {
             let status = child.wait().await;
@@ -280,6 +297,7 @@ impl TaskRunner {
                 }
             };
 
+            let _ = exit_code_tx.send(Some(exit_code));
             send_exit_events(&event_tx, &name, exit_code).await;
             (name, exit_code)
         });
@@ -303,6 +321,7 @@ impl TaskRunner {
 
         let event_tx_for_exit = self.event_tx.clone();
         let task_name_for_exit = self.config.name.clone();
+        let exit_code_tx = self.exit_code_tx.clone();
 
         let wrapped = tokio::spawn(async move {
             let result = handle.await;
@@ -313,6 +332,7 @@ impl TaskRunner {
                     (task_name_for_exit, None)
                 }
             };
+            let _ = exit_code_tx.send(Some(exit_code));
             send_exit_events(&event_tx_for_exit, &name, exit_code).await;
             (name, exit_code)
         });
@@ -330,10 +350,19 @@ impl TaskRunner {
     {
         let event_tx = self.event_tx.clone();
         let task_name = self.config.name.clone();
+        let ready_notify = self.ready_notify.clone();
+        let ready_flag = self.ready_flag.clone();
+        let pattern = self.log_line_pattern();
 
         let handle = tokio::spawn(async move {
             let mut lines = BufReader::new(reader).lines();
             while let Ok(Some(line)) = lines.next_line().await {
+                if let Some(ref pat) = pattern {
+                    if line.contains(pat.as_str()) {
+                        ready_flag.store(true, Ordering::Release);
+                        ready_notify.notify_one();
+                    }
+                }
                 let _ = event_tx
                     .send(ProcessEvent::LogLine {
                         task_name: task_name.clone(),
@@ -353,6 +382,9 @@ impl TaskRunner {
     fn spawn_pty_log_reader(&mut self, output: std::fs::File) {
         let event_tx = self.event_tx.clone();
         let task_name = self.config.name.clone();
+        let ready_notify = self.ready_notify.clone();
+        let ready_flag = self.ready_flag.clone();
+        let pattern = self.log_line_pattern();
 
         let handle = tokio::task::spawn_blocking(move || {
             use std::io::{BufRead, BufReader};
@@ -366,6 +398,12 @@ impl TaskRunner {
                 let cleaned = strip_ansi(&line);
                 if cleaned.is_empty() {
                     continue;
+                }
+                if let Some(ref pat) = pattern {
+                    if cleaned.contains(pat.as_str()) {
+                        ready_flag.store(true, Ordering::Release);
+                        ready_notify.notify_one();
+                    }
                 }
                 // blocking_send is fine inside spawn_blocking
                 let _ = event_tx.blocking_send(ProcessEvent::LogLine {
@@ -415,6 +453,90 @@ impl TaskRunner {
         }
 
         cmd
+    }
+
+    /// Extract the log_line pattern from ready_check config, if any.
+    fn log_line_pattern(&self) -> Option<String> {
+        self.config
+            .ready_check
+            .as_ref()
+            .and_then(|rc| rc.log_line.as_ref())
+            .map(|ll| ll.pattern.clone())
+    }
+
+    /// Determine the effective check type for this task.
+    fn effective_check_type(&self) -> CheckType {
+        match self.config.ready_check {
+            Some(ref rc) => {
+                if let Some(ref tcp) = rc.tcp {
+                    CheckType::Tcp(tcp.port)
+                } else if let Some(ref http) = rc.http {
+                    CheckType::Http {
+                        url: http.url.clone(),
+                        status: http.status,
+                    }
+                } else if rc.log_line.is_some() {
+                    CheckType::LogLine
+                } else {
+                    CheckType::Exit
+                }
+            }
+            None => CheckType::SmartDefault,
+        }
+    }
+
+    fn effective_timeout(&self) -> Duration {
+        let secs = self
+            .config
+            .ready_check
+            .as_ref()
+            .and_then(|rc| rc.timeout)
+            .unwrap_or(30);
+        Duration::from_secs(secs)
+    }
+
+    fn effective_interval(&self) -> Duration {
+        let ms = self
+            .config
+            .ready_check
+            .as_ref()
+            .and_then(|rc| rc.interval)
+            .unwrap_or(500);
+        Duration::from_millis(ms)
+    }
+
+    /// Wait for this task to become ready according to its ready_check config
+    /// or smart defaults.
+    pub async fn wait_ready(&self) -> ReadyResult {
+        let check_type = self.effective_check_type();
+        let timeout = self.effective_timeout();
+        let interval = self.effective_interval();
+
+        match check_type {
+            CheckType::SmartDefault => {
+                crate::process::ready::wait_smart_default(
+                    self.exit_code_rx.clone(),
+                )
+                .await
+            }
+            CheckType::Exit => {
+                crate::process::ready::wait_exit(self.exit_code_rx.clone(), timeout).await
+            }
+            CheckType::Tcp(port) => {
+                crate::process::ready::wait_tcp(port, timeout, interval).await
+            }
+            CheckType::Http { url, status } => {
+                crate::process::ready::wait_http(&url, status, timeout, interval).await
+            }
+            CheckType::LogLine => {
+                crate::process::ready::wait_log_line(
+                    self.ready_flag.clone(),
+                    self.ready_notify.clone(),
+                    timeout,
+                )
+                .await
+            }
+        }
     }
 
     async fn send_status(&self, status: TaskStatus) {

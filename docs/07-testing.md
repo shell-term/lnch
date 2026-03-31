@@ -104,6 +104,71 @@ async fn test_depends_on_start_order() {
 }
 ```
 
+### ready_check テスト
+
+```rust
+// src/process/ready.rs #[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn test_wait_smart_default_long_running() { /* 常駐→grace period後ready */ }
+
+    #[tokio::test]
+    async fn test_wait_smart_default_exit_success() { /* 一発タスク正常終了→ready */ }
+
+    #[tokio::test]
+    async fn test_wait_smart_default_exit_failure() { /* 一発タスク異常終了→failed */ }
+
+    #[tokio::test]
+    async fn test_wait_exit_success() { /* exit check正常終了 */ }
+
+    #[tokio::test]
+    async fn test_wait_exit_timeout() { /* exitタイムアウト */ }
+
+    #[tokio::test]
+    async fn test_wait_tcp_success() { /* TCPポートlisten成功 */ }
+
+    #[tokio::test]
+    async fn test_wait_tcp_timeout() { /* TCPタイムアウト */ }
+
+    #[tokio::test]
+    async fn test_wait_log_line_already_matched() { /* パターン即時マッチ */ }
+
+    #[tokio::test]
+    async fn test_wait_log_line_match_during_wait() { /* 待機中にパターンマッチ */ }
+
+    #[tokio::test]
+    async fn test_wait_log_line_timeout() { /* ログパターンタイムアウト */ }
+}
+```
+
+```rust
+// tests/ready_check_test.rs（統合テスト）
+
+#[tokio::test]
+async fn test_smart_default_oneshot_dependency() { /* 一発タスク依存→exit後に次グループ起動 */ }
+
+#[tokio::test]
+async fn test_smart_default_long_running_dependency() { /* 常駐タスク依存→grace period後に次グループ */ }
+
+#[tokio::test]
+async fn test_exit_ready_check() { /* 明示的exit check経由で起動順序保証 */ }
+
+#[tokio::test]
+async fn test_log_line_ready_check() { /* ログパターンマッチで次グループ起動 */ }
+
+#[tokio::test]
+async fn test_tcp_ready_check() { /* TCP listenで次グループ起動 */ }
+
+#[tokio::test]
+async fn test_ready_check_timeout_continues() { /* タイムアウト後も続行 */ }
+
+#[tokio::test]
+async fn test_no_deps_all_start_immediately() { /* 依存なし→全タスク同時起動 */ }
+
+#[tokio::test]
+async fn test_multi_level_dependency_chain() { /* a→b→c 3段チェーン */ }
+```
+
 ---
 
 ## 4. テストフィクスチャ
