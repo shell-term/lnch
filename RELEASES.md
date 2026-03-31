@@ -1,3 +1,9 @@
+# v0.1.10
+
+## New Features
+
+- **Quit confirmation for running processes** -- When pressing `q` while tasks are still running, lnch now shows a confirmation prompt in the status bar: "Processes are still running. Quit? [y] Yes [any] Cancel". If no processes are running, quit proceeds immediately without confirmation.
+
 # v0.1.9
 
 ## New Features
