@@ -40,13 +40,36 @@ pub fn render(frame: &mut Frame, state: &AppState) {
         .split(frame.area());
 
     // Title bar
-    let title = Paragraph::new(format!(" lnch: {} ", state.project_name)).style(
-        Style::default()
-            .fg(Color::White)
-            .bg(Color::Blue)
-            .add_modifier(Modifier::BOLD),
-    );
-    frame.render_widget(title, root[0]);
+    let title_style = Style::default()
+        .fg(Color::White)
+        .bg(Color::Blue)
+        .add_modifier(Modifier::BOLD);
+
+    if let Some(update) = &state.update_info {
+        let update_text = format!(" v{} available [u] Update ", update.latest_version);
+        let update_width = update_text.len() as u16;
+        let title_layout = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(0), Constraint::Length(update_width)])
+            .split(root[0]);
+
+        let title = Paragraph::new(format!(" lnch: {} ", state.project_name)).style(title_style);
+        frame.render_widget(title, title_layout[0]);
+
+        let update_label = Paragraph::new(update_text)
+            .style(
+                Style::default()
+                    .fg(Color::Yellow)
+                    .bg(Color::Blue)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .alignment(Alignment::Right);
+        frame.render_widget(update_label, title_layout[1]);
+    } else {
+        let title =
+            Paragraph::new(format!(" lnch: {} ", state.project_name)).style(title_style);
+        frame.render_widget(title, root[0]);
+    }
 
     // Main content area
     let main_area = Layout::default()
@@ -90,5 +113,5 @@ pub fn render(frame: &mut Frame, state: &AppState) {
     }
 
     // Status bar
-    render_status_bar(frame, root[2]);
+    render_status_bar(frame, root[2], state.update_info.is_some());
 }

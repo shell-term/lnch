@@ -5,3 +5,4 @@ pub mod log;
 pub mod message;
 pub mod process;
 pub mod tui;
+pub mod update;

@@ -111,6 +111,9 @@ lnch/
 │   │       ├── task_list.rs   # タスク一覧ウィジェット
 │   │       ├── log_view.rs    # ログ表示ウィジェット
 │   │       └── status_bar.rs  # ステータスバーウィジェット
+│   ├── update/
+│   │   ├── mod.rs             # モジュール公開定義
+│   │   └── checker.rs         # アップデートチェック（GitHub API、キャッシュ、実行）
 │   └── log/
 │       ├── mod.rs             # モジュール公開定義
 │       └── buffer.rs          # リングバッファによるログ保持

@@ -14,6 +14,7 @@ use tokio::sync::mpsc;
 use crate::config::model::{LnchConfig, TaskConfig};
 use crate::log::buffer::{LogBuffer, LogLine};
 use crate::message::{AppEvent, ProcessCommand, ProcessEvent, TaskStatus};
+use crate::update::checker::UpdateInfo;
 
 use super::event::{should_quit, spawn_event_reader};
 use super::ui;
@@ -65,6 +66,7 @@ pub struct AppState {
     /// Updated by `render_log_view` each frame via interior mutability,
     /// so scroll logic can compare against the true visual-line max.
     pub last_max_scroll: Cell<usize>,
+    pub update_info: Option<UpdateInfo>,
 }
 
 pub struct App {
@@ -73,6 +75,7 @@ pub struct App {
     process_event_rx: Option<mpsc::Receiver<ProcessEvent>>,
     app_event_rx: Option<mpsc::Receiver<AppEvent>>,
     app_event_tx: mpsc::Sender<AppEvent>,
+    update_on_exit: Option<UpdateInfo>,
 }
 
 impl App {
@@ -102,11 +105,13 @@ impl App {
                 should_quit: false,
                 auto_scroll: true,
                 last_max_scroll: Cell::new(0),
+                update_info: None,
             },
             process_cmd_tx,
             process_event_rx: Some(process_event_rx),
             app_event_rx: Some(app_event_rx),
             app_event_tx,
+            update_on_exit: None,
         }
     }
 
@@ -124,6 +129,12 @@ impl App {
 
         // Drop the guard first (restores terminal), then propagate any error
         drop(terminal);
+
+        // Execute update if the user requested it
+        if let Some(info) = self.update_on_exit.take() {
+            crate::update::checker::execute_update(&info);
+        }
+
         result
     }
 
@@ -141,6 +152,14 @@ impl App {
                 {
                     break;
                 }
+            }
+        });
+
+        // Spawn background update checker
+        let update_tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            if let Some(info) = crate::update::checker::check_for_update().await {
+                let _ = update_tx.send(AppEvent::UpdateAvailable(info)).await;
             }
         });
 
@@ -183,6 +202,9 @@ impl App {
             AppEvent::Tick => {}
             AppEvent::Process(event) => {
                 self.handle_process_event(event);
+            }
+            AppEvent::UpdateAvailable(info) => {
+                self.state.update_info = Some(info);
             }
         }
     }
@@ -233,6 +255,13 @@ impl App {
             }
 
             KeyCode::Char('c') => self.clear_selected_log(),
+
+            KeyCode::Char('u') => {
+                if let Some(info) = self.state.update_info.clone() {
+                    self.update_on_exit = Some(info);
+                    self.state.should_quit = true;
+                }
+            }
 
             _ => {}
         }

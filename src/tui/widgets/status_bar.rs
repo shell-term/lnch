@@ -1,8 +1,8 @@
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
 
-pub fn render_status_bar(frame: &mut Frame, area: Rect) {
-    let help_text = Line::from(vec![
+pub fn render_status_bar(frame: &mut Frame, area: Rect, update_available: bool) {
+    let mut spans = vec![
         Span::styled("[a]", Style::default().fg(Color::Yellow).bold()),
         Span::raw(" All Start  "),
         Span::styled("[s]", Style::default().fg(Color::Yellow).bold()),
@@ -13,12 +13,18 @@ pub fn render_status_bar(frame: &mut Frame, area: Rect) {
         Span::raw(" Select  "),
         Span::styled("[c]", Style::default().fg(Color::Yellow).bold()),
         Span::raw(" Clear  "),
-        Span::styled("[q]", Style::default().fg(Color::Yellow).bold()),
-        Span::raw(" Quit"),
-    ]);
+    ];
 
-    let bar =
-        Paragraph::new(help_text).style(Style::default().bg(Color::DarkGray).fg(Color::White));
+    if update_available {
+        spans.push(Span::styled("[u]", Style::default().fg(Color::Green).bold()));
+        spans.push(Span::raw(" Update  "));
+    }
+
+    spans.push(Span::styled("[q]", Style::default().fg(Color::Yellow).bold()));
+    spans.push(Span::raw(" Quit"));
+
+    let bar = Paragraph::new(Line::from(spans))
+        .style(Style::default().bg(Color::DarkGray).fg(Color::White));
 
     frame.render_widget(bar, area);
 }
