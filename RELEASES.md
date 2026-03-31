@@ -1,3 +1,9 @@
+# v0.1.11
+
+## Bug Fixes
+
+- **Fix update installer failing on Windows** -- The update installer invoked `powershell` (Windows PowerShell 5.1) which could fail with a `Microsoft.PowerShell.Security` module loading error. Now prefers `pwsh` (PowerShell 7+) when available, falling back to `powershell`.
+
 # v0.1.10
 
 ## New Features
