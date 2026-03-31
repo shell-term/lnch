@@ -1,7 +1,22 @@
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
 
-pub fn render_status_bar(frame: &mut Frame, area: Rect, update_available: bool) {
+pub fn render_status_bar(frame: &mut Frame, area: Rect, update_available: bool, confirm_quit: bool) {
+    if confirm_quit {
+        let spans = vec![
+            Span::styled(" Processes are still running. ", Style::default().fg(Color::Yellow)),
+            Span::raw("Quit? "),
+            Span::styled("[y]", Style::default().fg(Color::Red).bold()),
+            Span::raw(" Yes  "),
+            Span::styled("[any]", Style::default().fg(Color::Green).bold()),
+            Span::raw(" Cancel"),
+        ];
+        let bar = Paragraph::new(Line::from(spans))
+            .style(Style::default().bg(Color::DarkGray).fg(Color::White));
+        frame.render_widget(bar, area);
+        return;
+    }
+
     let mut spans = vec![
         Span::styled("[a]", Style::default().fg(Color::Yellow).bold()),
         Span::raw(" All Start  "),

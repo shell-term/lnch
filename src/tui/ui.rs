@@ -113,5 +113,5 @@ pub fn render(frame: &mut Frame, state: &AppState) {
     }
 
     // Status bar
-    render_status_bar(frame, root[2], state.update_info.is_some());
+    render_status_bar(frame, root[2], state.update_info.is_some(), state.confirm_quit);
 }

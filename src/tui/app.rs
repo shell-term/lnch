@@ -62,6 +62,7 @@ pub struct AppState {
     pub selected_index: usize,
     pub log_scroll_offset: usize,
     pub should_quit: bool,
+    pub confirm_quit: bool,
     pub auto_scroll: bool,
     /// Updated by `render_log_view` each frame via interior mutability,
     /// so scroll logic can compare against the true visual-line max.
@@ -103,6 +104,7 @@ impl App {
                 selected_index: 0,
                 log_scroll_offset: 0,
                 should_quit: false,
+                confirm_quit: false,
                 auto_scroll: true,
                 last_max_scroll: Cell::new(0),
                 update_info: None,
@@ -214,8 +216,25 @@ impl App {
             return;
         }
 
+        // Handle quit confirmation mode
+        if self.state.confirm_quit {
+            match key.code {
+                KeyCode::Char('y') => {
+                    self.state.should_quit = true;
+                }
+                _ => {
+                    self.state.confirm_quit = false;
+                }
+            }
+            return;
+        }
+
         if should_quit(&key) {
-            self.state.should_quit = true;
+            if self.has_running_tasks() {
+                self.state.confirm_quit = true;
+            } else {
+                self.state.should_quit = true;
+            }
             return;
         }
 
@@ -376,6 +395,13 @@ impl App {
             .get(self.state.selected_index)
             .map(|t| matches!(t.status, TaskStatus::Running | TaskStatus::Starting))
             .unwrap_or(false)
+    }
+
+    fn has_running_tasks(&self) -> bool {
+        self.state
+            .tasks
+            .iter()
+            .any(|t| matches!(t.status, TaskStatus::Running | TaskStatus::Starting))
     }
 
     fn find_task_mut(&mut self, name: &str) -> Option<&mut TaskState> {
