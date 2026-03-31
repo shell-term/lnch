@@ -165,7 +165,6 @@ pub async fn check_for_update() -> Option<UpdateInfo> {
 }
 
 /// Return "pwsh" if PowerShell 7+ is on PATH, otherwise "powershell".
-#[cfg(windows)]
 fn find_powershell() -> &'static str {
     use std::sync::OnceLock;
     static PS: OnceLock<&str> = OnceLock::new();
