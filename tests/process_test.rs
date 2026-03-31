@@ -12,6 +12,7 @@ fn simple_task_config(name: &str, command: &str) -> TaskConfig {
         env: None,
         color: None,
         depends_on: None,
+        ready_check: None,
     }
 }
 

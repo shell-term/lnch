@@ -20,7 +20,7 @@ A TUI multi-process launcher for your dev environment — manage all your local 
 
 - **One YAML, one command** — Define all your services in `lnch.yaml` and launch them with `lnch`
 - **TUI dashboard** — Monitor process status and logs in a split-pane terminal UI powered by [ratatui](https://github.com/ratatui/ratatui)
-- **Dependency ordering** — `depends_on` ensures services start in the right order via topological sort
+- **Dependency ordering** — `depends_on` ensures services start in the right order via topological sort, with readiness checks (`ready_check`) to wait until dependencies are actually ready
 - **Auto-discovery** — `lnch` searches up the directory tree for `lnch.yaml`, so it works from any subdirectory
 - **Per-task logs** — stdout/stderr captured in ring buffers with color-coded display
 - **Graceful shutdown** — SIGTERM with timeout, then SIGKILL; process groups ensure no orphan processes
@@ -135,10 +135,51 @@ lnch --help              # Show help
 | `tasks[].env` | `map` | No | `{}` | Environment variables (inherits parent env, then overrides) |
 | `tasks[].color` | `string` | No | Auto-assigned | Task color: `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white` |
 | `tasks[].depends_on` | `list` | No | `[]` | Tasks that must start before this one |
+| `tasks[].ready_check` | `object` | No | Smart default | Readiness check for dependency waiting (see below) |
 
 ### Config File Discovery
 
 When run without `--config`, `lnch` searches for `lnch.yaml` starting from the current directory and walking up the tree (up to 10 levels). This means you can run `lnch` from any subdirectory of your project.
+
+### Ready Checks
+
+When a task has `depends_on`, lnch waits for each dependency to become "ready" before starting the dependent task. By default, smart detection is used (one-shot tasks are ready when they exit successfully; long-running tasks are ready after a 2-second grace period). For more control, use `ready_check`:
+
+```yaml
+tasks:
+  - name: database
+    command: docker compose up postgres
+    ready_check:
+      tcp: { port: 5432 }     # Wait for TCP port to accept connections
+      timeout: 60              # Timeout in seconds (default: 30)
+
+  - name: migrate
+    command: sqlx migrate run
+    ready_check:
+      exit: {}                 # Wait for the process to exit with code 0
+
+  - name: backend
+    command: cargo run
+    depends_on: [database, migrate]
+    ready_check:
+      log_line: { pattern: "listening on port" }  # Wait for log output pattern
+
+  - name: frontend
+    command: npm run dev
+    depends_on: [backend]
+    # No ready_check: smart default (grace period for long-running process)
+```
+
+| Check type | Description |
+|-----------|-------------|
+| `tcp: { port: <N> }` | Wait for a TCP connection to succeed on `127.0.0.1:<port>` |
+| `http: { url: "<URL>", status: <N> }` | Wait for an HTTP GET to return the expected status (default: 200). HTTP only, not HTTPS. |
+| `log_line: { pattern: "<text>" }` | Wait for a substring match in stdout/stderr |
+| `exit: {}` | Wait for the process to exit with code 0 |
+
+Common options: `timeout` (seconds, default: 30), `interval` (milliseconds, default: 500).
+
+If the readiness check times out, lnch logs a warning and continues starting the next group.
 
 ### Command Execution
 

@@ -14,6 +14,7 @@ pub fn validate_config(config: &LnchConfig, base_dir: &Path) -> Result<(), LnchE
     validate_colors(config)?;
     validate_working_dirs(config, base_dir)?;
     validate_dependency_refs(config)?;
+    validate_ready_checks(config)?;
     Ok(())
 }
 
@@ -72,6 +73,43 @@ fn validate_working_dirs(config: &LnchConfig, base_dir: &Path) -> Result<(), Lnc
     Ok(())
 }
 
+fn validate_ready_checks(config: &LnchConfig) -> Result<(), LnchError> {
+    for task in &config.tasks {
+        if let Some(ref rc) = task.ready_check {
+            let count = rc.check_type_count();
+            if count == 0 {
+                return Err(LnchError::ConfigValidation(format!(
+                    "Task '{}': ready_check must specify exactly one of: tcp, http, log_line, exit",
+                    task.name
+                )));
+            }
+            if count > 1 {
+                return Err(LnchError::ConfigValidation(format!(
+                    "Task '{}': ready_check must specify only one of: tcp, http, log_line, exit (found {})",
+                    task.name, count
+                )));
+            }
+            if let Some(ref http) = rc.http {
+                if http.url.is_empty() {
+                    return Err(LnchError::ConfigValidation(format!(
+                        "Task '{}': ready_check http url must not be empty",
+                        task.name
+                    )));
+                }
+            }
+            if let Some(ref log_line) = rc.log_line {
+                if log_line.pattern.is_empty() {
+                    return Err(LnchError::ConfigValidation(format!(
+                        "Task '{}': ready_check log_line pattern must not be empty",
+                        task.name
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_dependency_refs(config: &LnchConfig) -> Result<(), LnchError> {
     let task_names: HashSet<&str> = config.tasks.iter().map(|t| t.name.as_str()).collect();
 
@@ -103,6 +141,7 @@ mod tests {
             env: None,
             color: None,
             depends_on: None,
+            ready_check: None,
         }
     }
 
@@ -158,6 +197,116 @@ mod tests {
         let result = validate_config(&config, Path::new("."));
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Invalid color"));
+    }
+
+    #[test]
+    fn test_validate_ready_check_no_type() {
+        use crate::config::model::ReadyCheckConfig;
+        let mut task = base_task("a");
+        task.ready_check = Some(ReadyCheckConfig {
+            tcp: None,
+            http: None,
+            log_line: None,
+            exit: None,
+            timeout: None,
+            interval: None,
+        });
+        let config = LnchConfig {
+            name: "test".to_string(),
+            tasks: vec![task],
+        };
+        let result = validate_config(&config, Path::new("."));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("must specify exactly one of"));
+    }
+
+    #[test]
+    fn test_validate_ready_check_multiple_types() {
+        use crate::config::model::{ReadyCheckConfig, TcpCheck, ExitCheck};
+        let mut task = base_task("a");
+        task.ready_check = Some(ReadyCheckConfig {
+            tcp: Some(TcpCheck { port: 5432 }),
+            http: None,
+            log_line: None,
+            exit: Some(ExitCheck {}),
+            timeout: None,
+            interval: None,
+        });
+        let config = LnchConfig {
+            name: "test".to_string(),
+            tasks: vec![task],
+        };
+        let result = validate_config(&config, Path::new("."));
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("must specify only one of"));
+    }
+
+    #[test]
+    fn test_validate_ready_check_empty_http_url() {
+        use crate::config::model::{ReadyCheckConfig, HttpCheck};
+        let mut task = base_task("a");
+        task.ready_check = Some(ReadyCheckConfig {
+            tcp: None,
+            http: Some(HttpCheck { url: "".to_string(), status: None }),
+            log_line: None,
+            exit: None,
+            timeout: None,
+            interval: None,
+        });
+        let config = LnchConfig {
+            name: "test".to_string(),
+            tasks: vec![task],
+        };
+        let result = validate_config(&config, Path::new("."));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("url must not be empty"));
+    }
+
+    #[test]
+    fn test_validate_ready_check_empty_log_pattern() {
+        use crate::config::model::{ReadyCheckConfig, LogLineCheck};
+        let mut task = base_task("a");
+        task.ready_check = Some(ReadyCheckConfig {
+            tcp: None,
+            http: None,
+            log_line: Some(LogLineCheck { pattern: "".to_string() }),
+            exit: None,
+            timeout: None,
+            interval: None,
+        });
+        let config = LnchConfig {
+            name: "test".to_string(),
+            tasks: vec![task],
+        };
+        let result = validate_config(&config, Path::new("."));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("pattern must not be empty"));
+    }
+
+    #[test]
+    fn test_validate_ready_check_valid_tcp() {
+        use crate::config::model::{ReadyCheckConfig, TcpCheck};
+        let mut task = base_task("a");
+        task.ready_check = Some(ReadyCheckConfig {
+            tcp: Some(TcpCheck { port: 8080 }),
+            http: None,
+            log_line: None,
+            exit: None,
+            timeout: Some(10),
+            interval: Some(200),
+        });
+        let config = LnchConfig {
+            name: "test".to_string(),
+            tasks: vec![task],
+        };
+        let result = validate_config(&config, Path::new("."));
+        assert!(result.is_ok());
     }
 
     #[test]
