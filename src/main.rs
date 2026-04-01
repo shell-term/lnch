@@ -39,6 +39,8 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    crate::update::checker::cleanup_old_exe();
+
     let cli = Cli::parse();
 
     let config_path = match cli.config {
