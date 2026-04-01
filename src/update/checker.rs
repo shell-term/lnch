@@ -19,12 +19,15 @@ impl UpdateInfo {
     /// The shell command the user would run to install this version.
     pub fn install_command(&self) -> String {
         let v = &self.latest_version;
-        if cfg!(windows) {
+        #[cfg(windows)]
+        {
             let ps = find_powershell();
             format!(
                 "{ps} -ExecutionPolicy ByPass -c \"irm https://github.com/shell-term/lnch/releases/download/v{v}/lnch-installer.ps1 | iex\""
             )
-        } else {
+        }
+        #[cfg(not(windows))]
+        {
             format!(
                 "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/shell-term/lnch/releases/download/v{v}/lnch-installer.sh | sh"
             )
@@ -189,7 +192,8 @@ pub fn execute_update(info: &UpdateInfo) {
     println!("  > {}", info.install_command());
     println!();
 
-    let status = if cfg!(windows) {
+    #[cfg(windows)]
+    let status = {
         let ps = find_powershell();
         let ps_script = format!(
             "irm https://github.com/shell-term/lnch/releases/download/v{}/lnch-installer.ps1 | iex",
@@ -198,7 +202,9 @@ pub fn execute_update(info: &UpdateInfo) {
         std::process::Command::new(ps)
             .args(["-ExecutionPolicy", "ByPass", "-Command", &ps_script])
             .status()
-    } else {
+    };
+    #[cfg(not(windows))]
+    let status = {
         std::process::Command::new("sh")
             .args(["-c", &info.install_command()])
             .status()

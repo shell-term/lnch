@@ -94,6 +94,9 @@ pub fn render(frame: &mut Frame, state: &AppState) {
         })
         .collect();
 
+    state.last_task_list_area.set(main_area[0]);
+    state.last_log_area.set(main_area[1]);
+
     render_task_list(frame, main_area[0], &task_list_data, state.selected_index);
 
     // Log view

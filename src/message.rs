@@ -1,4 +1,4 @@
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseEvent};
 
 use crate::update::checker::UpdateInfo;
 
@@ -46,6 +46,7 @@ pub enum ProcessEvent {
 #[derive(Debug)]
 pub enum AppEvent {
     Key(KeyEvent),
+    Mouse(MouseEvent),
     Tick,
     Process(ProcessEvent),
     UpdateAvailable(UpdateInfo),

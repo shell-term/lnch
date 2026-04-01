@@ -1,3 +1,9 @@
+# v0.1.12
+
+## New Features
+
+- **Mouse support** -- Mouse scroll wheel now scrolls the log view (3 lines per tick) instead of switching between tasks. Left-click on the task list selects that task. Mouse events are ignored during the quit confirmation dialog.
+
 # v0.1.11
 
 ## Bug Fixes

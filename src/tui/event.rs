@@ -29,6 +29,11 @@ pub fn spawn_event_reader(tx: mpsc::Sender<AppEvent>) -> tokio::task::JoinHandle
                                 break;
                             }
                         }
+                        Some(Ok(Event::Mouse(mouse))) => {
+                            if tx.send(AppEvent::Mouse(mouse)).await.is_err() {
+                                break;
+                            }
+                        }
                         Some(Err(_)) | None => break,
                         _ => {}
                     }

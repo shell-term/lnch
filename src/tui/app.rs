@@ -3,7 +3,9 @@ use std::io;
 use std::panic;
 use std::time::Instant;
 
-use crossterm::event::KeyCode;
+use crossterm::event::{
+    DisableMouseCapture, EnableMouseCapture, KeyCode, MouseButton, MouseEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -32,7 +34,11 @@ impl TerminalGuard {
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
+        let _ = execute!(
+            self.terminal.backend_mut(),
+            DisableMouseCapture,
+            LeaveAlternateScreen
+        );
         let _ = self.terminal.show_cursor();
     }
 }
@@ -68,6 +74,9 @@ pub struct AppState {
     /// so scroll logic can compare against the true visual-line max.
     pub last_max_scroll: Cell<usize>,
     pub update_info: Option<UpdateInfo>,
+    /// Updated by `render` each frame so mouse handler knows widget areas.
+    pub last_task_list_area: Cell<Rect>,
+    pub last_log_area: Cell<Rect>,
 }
 
 pub struct App {
@@ -108,6 +117,8 @@ impl App {
                 auto_scroll: true,
                 last_max_scroll: Cell::new(0),
                 update_info: None,
+                last_task_list_area: Cell::new(Rect::default()),
+                last_log_area: Cell::new(Rect::default()),
             },
             process_cmd_tx,
             process_event_rx: Some(process_event_rx),
@@ -123,7 +134,7 @@ impl App {
         let prev_hook = panic::take_hook();
         panic::set_hook(Box::new(move |info| {
             let _ = disable_raw_mode();
-            let _ = execute!(io::stdout(), LeaveAlternateScreen);
+            let _ = execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
             prev_hook(info);
         }));
 
@@ -201,6 +212,9 @@ impl App {
                 tracing::debug!(key = ?key, "Key event received");
                 self.handle_key(key).await;
             }
+            AppEvent::Mouse(mouse) => {
+                self.handle_mouse(mouse);
+            }
             AppEvent::Tick => {}
             AppEvent::Process(event) => {
                 self.handle_process_event(event);
@@ -262,8 +276,8 @@ impl App {
                     .await;
             }
 
-            KeyCode::Char('k') => self.scroll_log_up(),
-            KeyCode::Char('j') => self.scroll_log_down(),
+            KeyCode::Char('k') => self.scroll_log_up_by(10),
+            KeyCode::Char('j') => self.scroll_log_down_by(10),
             KeyCode::Home => {
                 self.state.log_scroll_offset = 0;
                 self.state.auto_scroll = false;
@@ -338,7 +352,7 @@ impl App {
         }
     }
 
-    fn scroll_log_up(&mut self) {
+    fn scroll_log_up_by(&mut self, lines: usize) {
         self.state.auto_scroll = false;
         // Normalize sentinel (usize::MAX) to the actual max before subtracting,
         // otherwise the arithmetic has no visible effect.
@@ -346,16 +360,16 @@ impl App {
             .state
             .log_scroll_offset
             .min(self.state.last_max_scroll.get());
-        self.state.log_scroll_offset = current.saturating_sub(10);
+        self.state.log_scroll_offset = current.saturating_sub(lines);
     }
 
-    fn scroll_log_down(&mut self) {
+    fn scroll_log_down_by(&mut self, lines: usize) {
         // Same normalization for consistency.
         let current = self
             .state
             .log_scroll_offset
             .min(self.state.last_max_scroll.get());
-        self.state.log_scroll_offset = current.saturating_add(10);
+        self.state.log_scroll_offset = current.saturating_add(lines);
         if self.state.log_scroll_offset >= self.state.last_max_scroll.get() {
             self.state.auto_scroll = true;
             self.snap_scroll_to_bottom();
@@ -404,6 +418,55 @@ impl App {
             .any(|t| matches!(t.status, TaskStatus::Running | TaskStatus::Starting))
     }
 
+    fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent) {
+        if self.state.confirm_quit {
+            return;
+        }
+
+        let task_list_area = self.state.last_task_list_area.get();
+        let log_area = self.state.last_log_area.get();
+        let col = mouse.column;
+        let row = mouse.row;
+
+        let in_task_list = col >= task_list_area.x
+            && col < task_list_area.x + task_list_area.width
+            && row >= task_list_area.y
+            && row < task_list_area.y + task_list_area.height;
+
+        let in_log_area = col >= log_area.x
+            && col < log_area.x + log_area.width
+            && row >= log_area.y
+            && row < log_area.y + log_area.height;
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                if in_log_area || in_task_list {
+                    self.scroll_log_up_by(3);
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if in_log_area || in_task_list {
+                    self.scroll_log_down_by(3);
+                }
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                if in_task_list {
+                    // +1 to skip the border top row
+                    let clicked_index = (row - task_list_area.y).saturating_sub(1) as usize;
+                    self.select_task(clicked_index);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn select_task(&mut self, index: usize) {
+        if index < self.state.tasks.len() && index != self.state.selected_index {
+            self.state.selected_index = index;
+            self.reset_scroll();
+        }
+    }
+
     fn find_task_mut(&mut self, name: &str) -> Option<&mut TaskState> {
         self.state.tasks.iter_mut().find(|t| t.config.name == name)
     }
@@ -412,7 +475,7 @@ impl App {
 fn setup_terminal() -> anyhow::Result<Terminal<CrosstermBackend<io::Stdout>>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let terminal = Terminal::new(backend)?;
     Ok(terminal)
