@@ -1,3 +1,9 @@
+# v0.1.13
+
+## Bug Fixes
+
+- **Fix self-update failing on Windows** -- The installer could not overwrite the running `lnch.exe`. Now renames the running executable to `lnch.exe.bak` before running the installer, and cleans up the backup on next startup. If the installer fails, the backup is automatically restored.
+
 # v0.1.12
 
 ## New Features

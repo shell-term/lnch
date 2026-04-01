@@ -184,6 +184,31 @@ fn find_powershell() -> &'static str {
     })
 }
 
+/// On Windows, rename the running exe out of the way so the installer can
+/// write the new binary. Returns the backup path on success.
+#[cfg(windows)]
+fn rename_current_exe() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let bak = exe.with_extension("exe.bak");
+    // Remove leftover .bak from a previous update attempt
+    let _ = std::fs::remove_file(&bak);
+    std::fs::rename(&exe, &bak).ok()?;
+    Some(bak)
+}
+
+/// Remove leftover .bak from a previous update. Call early at startup.
+#[cfg(windows)]
+pub fn cleanup_old_exe() {
+    if let Ok(exe) = std::env::current_exe() {
+        let bak = exe.with_extension("exe.bak");
+        let _ = std::fs::remove_file(bak);
+    }
+}
+
+/// Stub for non-Windows — nothing to clean up.
+#[cfg(not(windows))]
+pub fn cleanup_old_exe() {}
+
 /// Execute the update installer. Call this after the TUI has been torn down
 /// so that installer output is visible in the terminal.
 pub fn execute_update(info: &UpdateInfo) {
@@ -191,6 +216,14 @@ pub fn execute_update(info: &UpdateInfo) {
     println!("  Updating lnch to v{}...", info.latest_version);
     println!("  > {}", info.install_command());
     println!();
+
+    // On Windows, rename the running exe so the installer can overwrite it.
+    #[cfg(windows)]
+    let bak_path = rename_current_exe();
+    #[cfg(windows)]
+    if bak_path.is_none() {
+        println!("  Warning: could not rename running executable; installer may fail.");
+    }
 
     #[cfg(windows)]
     let status = {
@@ -219,6 +252,17 @@ pub fn execute_update(info: &UpdateInfo) {
             println!();
         }
         _ => {
+            // Restore the backup if the installer failed
+            #[cfg(windows)]
+            if let Some(bak) = bak_path {
+                if let Ok(exe) = std::env::current_exe() {
+                    // current_exe may now point to the (missing) original path
+                    let target = exe.with_extension("exe");
+                    if !target.exists() {
+                        let _ = std::fs::rename(&bak, &target);
+                    }
+                }
+            }
             println!();
             println!("  Update failed. You can try manually:");
             println!("  {}", info.install_command());
