@@ -1,7 +1,7 @@
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
 
-pub fn render_status_bar(frame: &mut Frame, area: Rect, update_available: bool, confirm_quit: bool) {
+pub fn render_status_bar(frame: &mut Frame, area: Rect, update_available: bool, confirm_quit: bool, show_copied: bool, show_selected: bool) {
     if confirm_quit {
         let spans = vec![
             Span::styled(" Processes are still running. ", Style::default().fg(Color::Yellow)),
@@ -37,6 +37,21 @@ pub fn render_status_bar(frame: &mut Frame, area: Rect, update_available: bool, 
 
     spans.push(Span::styled("[q]", Style::default().fg(Color::Yellow).bold()));
     spans.push(Span::raw(" Quit"));
+
+    if show_copied {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            " Copied! ",
+            Style::default().fg(Color::Black).bg(Color::Green).bold(),
+        ));
+    } else if show_selected {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(
+            "[Ctrl+C]",
+            Style::default().fg(Color::Cyan).bold(),
+        ));
+        spans.push(Span::raw(" Copy"));
+    }
 
     let bar = Paragraph::new(Line::from(spans))
         .style(Style::default().bg(Color::DarkGray).fg(Color::White));

@@ -1,10 +1,10 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::io;
 use std::panic;
 use std::time::Instant;
 
 use crossterm::event::{
-    DisableMouseCapture, EnableMouseCapture, KeyCode, MouseButton, MouseEventKind,
+    DisableMouseCapture, EnableMouseCapture, KeyCode, KeyModifiers, MouseButton, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -18,8 +18,11 @@ use crate::log::buffer::{LogBuffer, LogLine};
 use crate::message::{AppEvent, ProcessCommand, ProcessEvent, TaskStatus};
 use crate::update::checker::UpdateInfo;
 
+use super::clipboard;
 use super::event::{should_quit, spawn_event_reader};
+use super::selection::{ScreenPos, SelectionMode, SelectionState};
 use super::ui;
+use super::widgets::line_wrapper::WrappedContent;
 
 struct TerminalGuard {
     terminal: Terminal<CrosstermBackend<io::Stdout>>,
@@ -77,6 +80,11 @@ pub struct AppState {
     /// Updated by `render` each frame so mouse handler knows widget areas.
     pub last_task_list_area: Cell<Rect>,
     pub last_log_area: Cell<Rect>,
+    /// Text selection state machine.
+    pub selection: SelectionState,
+    /// Cached wrapped content from the last render, used by mouse handler
+    /// to map screen coordinates to text positions.
+    pub last_wrapped_content: RefCell<Option<WrappedContent>>,
 }
 
 pub struct App {
@@ -119,6 +127,8 @@ impl App {
                 update_info: None,
                 last_task_list_area: Cell::new(Rect::default()),
                 last_log_area: Cell::new(Rect::default()),
+                selection: SelectionState::new(),
+                last_wrapped_content: RefCell::new(None),
             },
             process_cmd_tx,
             process_event_rx: Some(process_event_rx),
@@ -215,7 +225,9 @@ impl App {
             AppEvent::Mouse(mouse) => {
                 self.handle_mouse(mouse);
             }
-            AppEvent::Tick => {}
+            AppEvent::Tick => {
+                self.state.selection.tick();
+            }
             AppEvent::Process(event) => {
                 self.handle_process_event(event);
             }
@@ -240,6 +252,15 @@ impl App {
                     self.state.confirm_quit = false;
                 }
             }
+            return;
+        }
+
+        // Ctrl+C with active selection → copy instead of quit
+        if key.code == KeyCode::Char('c')
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+            && self.state.selection.is_selected()
+        {
+            self.copy_selection();
             return;
         }
 
@@ -340,6 +361,7 @@ impl App {
 
     fn select_previous_task(&mut self) {
         if self.state.selected_index > 0 {
+            self.state.selection.clear();
             self.state.selected_index -= 1;
             self.reset_scroll();
         }
@@ -347,12 +369,14 @@ impl App {
 
     fn select_next_task(&mut self) {
         if self.state.selected_index + 1 < self.state.tasks.len() {
+            self.state.selection.clear();
             self.state.selected_index += 1;
             self.reset_scroll();
         }
     }
 
     fn scroll_log_up_by(&mut self, lines: usize) {
+        self.state.selection.clear();
         self.state.auto_scroll = false;
         // Normalize sentinel (usize::MAX) to the actual max before subtracting,
         // otherwise the arithmetic has no visible effect.
@@ -364,6 +388,7 @@ impl App {
     }
 
     fn scroll_log_down_by(&mut self, lines: usize) {
+        self.state.selection.clear();
         // Same normalization for consistency.
         let current = self
             .state
@@ -388,6 +413,7 @@ impl App {
     }
 
     fn clear_selected_log(&mut self) {
+        self.state.selection.clear();
         if let Some(task) = self.state.tasks.get_mut(self.state.selected_index) {
             task.log_buffer.clear();
             self.state.log_scroll_offset = 0;
@@ -450,18 +476,127 @@ impl App {
                 }
             }
             MouseEventKind::Down(MouseButton::Left) => {
-                if in_task_list {
+                if in_log_area {
+                    let mode = if mouse.modifiers.contains(KeyModifiers::ALT) {
+                        SelectionMode::Block
+                    } else {
+                        SelectionMode::Normal
+                    };
+                    self.state.selection =
+                        SelectionState::start_selecting(ScreenPos { col, row }, mode);
+                } else if in_task_list {
                     // +1 to skip the border top row
                     let clicked_index = (row - task_list_area.y).saturating_sub(1) as usize;
                     self.select_task(clicked_index);
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if let SelectionState::Selecting {
+                    ref mut current, ..
+                } = self.state.selection
+                {
+                    *current = ScreenPos { col, row };
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                if let Some((anchor, current, _)) = self.state.selection.selecting_range() {
+                    if anchor == current {
+                        // Single click (no drag) — clear selection
+                        self.state.selection.clear();
+                    } else {
+                        // Finalize selection, keep highlight visible
+                        self.state.selection.finish_selecting();
+                    }
+                }
+            }
+            MouseEventKind::Down(MouseButton::Right) => {
+                if self.state.selection.is_selected() {
+                    self.copy_selection();
                 }
             }
             _ => {}
         }
     }
 
+    fn copy_selection(&mut self) {
+        let (anchor, current, mode) = match self.state.selection.selecting_range() {
+            Some(v) => v,
+            None => return,
+        };
+
+        let log_area = self.state.last_log_area.get();
+        let content_x = log_area.x + 1; // left border
+        let content_y = log_area.y + 1; // top border
+
+        let wrapped_ref = self.state.last_wrapped_content.borrow();
+        let wrapped = match wrapped_ref.as_ref() {
+            Some(w) => w,
+            None => return,
+        };
+
+        // Normalize anchor/current to reading order
+        let (start, end) = if anchor.row < current.row
+            || (anchor.row == current.row && anchor.col <= current.col)
+        {
+            (anchor, current)
+        } else {
+            (current, anchor)
+        };
+
+        let start_row = start.row.saturating_sub(content_y) as usize;
+        let start_col = start.col.saturating_sub(content_x) as usize;
+        let end_row = end.row.saturating_sub(content_y) as usize;
+        let end_col = end.col.saturating_sub(content_x) as usize;
+
+        let effective_scroll = self
+            .state
+            .log_scroll_offset
+            .min(self.state.last_max_scroll.get());
+
+        let text = match mode {
+            SelectionMode::Normal => {
+                let sp = wrapped.screen_to_text(start_row, start_col, effective_scroll);
+                let ep = wrapped.screen_to_text(end_row, end_col, effective_scroll);
+                match (sp, ep) {
+                    (Some(s), Some(e)) => wrapped.extract_text(s, e),
+                    _ => return,
+                }
+            }
+            SelectionMode::Block => {
+                let s_vl = wrapped.screen_to_text(start_row, 0, effective_scroll);
+                let e_vl = wrapped.screen_to_text(end_row, 0, effective_scroll);
+                match (s_vl, e_vl) {
+                    (Some(s), Some(e)) => {
+                        let (r_lo, r_hi) = if s.visual_line_index <= e.visual_line_index {
+                            (s.visual_line_index, e.visual_line_index)
+                        } else {
+                            (e.visual_line_index, s.visual_line_index)
+                        };
+                        let (c_lo, c_hi) = if start_col <= end_col {
+                            (start_col, end_col)
+                        } else {
+                            (end_col, start_col)
+                        };
+                        wrapped.extract_block_text(r_lo, r_hi, c_lo, c_hi)
+                    }
+                    _ => return,
+                }
+            }
+        };
+
+        drop(wrapped_ref);
+
+        if !text.is_empty() {
+            let _ = clipboard::copy_to_clipboard(&text);
+            self.state.selection = SelectionState::copied();
+        } else {
+            self.state.selection.clear();
+        }
+    }
+
     fn select_task(&mut self, index: usize) {
         if index < self.state.tasks.len() && index != self.state.selected_index {
+            self.state.selection.clear();
             self.state.selected_index = index;
             self.reset_scroll();
         }

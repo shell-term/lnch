@@ -108,6 +108,8 @@ pub fn render(frame: &mut Frame, state: &AppState) {
             &selected_task.log_buffer,
             state.log_scroll_offset,
             &state.last_max_scroll,
+            &state.selection,
+            &state.last_wrapped_content,
         );
     } else {
         state.last_max_scroll.set(0);
@@ -116,5 +118,12 @@ pub fn render(frame: &mut Frame, state: &AppState) {
     }
 
     // Status bar
-    render_status_bar(frame, root[2], state.update_info.is_some(), state.confirm_quit);
+    render_status_bar(
+        frame,
+        root[2],
+        state.update_info.is_some(),
+        state.confirm_quit,
+        state.selection.show_copied(),
+        state.selection.is_selected(),
+    );
 }

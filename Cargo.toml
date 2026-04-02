@@ -1,6 +1,6 @@
 [package]
 name = "lnch"
-version = "0.1.13"
+version = "0.1.14"
 edition = "2021"
 description = "A TUI multi-process launcher for your dev environment"
 license = "MIT"
@@ -23,6 +23,8 @@ thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
+unicode-width = "0.2"
+unicode-segmentation = "1.12"
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31", features = ["signal", "process"] }
