@@ -85,6 +85,8 @@ pub struct AppState {
     /// Cached wrapped content from the last render, used by mouse handler
     /// to map screen coordinates to text positions.
     pub last_wrapped_content: RefCell<Option<WrappedContent>>,
+    /// True while the user is dragging the scrollbar thumb.
+    pub scrollbar_dragging: bool,
 }
 
 pub struct App {
@@ -129,6 +131,7 @@ impl App {
                 last_log_area: Cell::new(Rect::default()),
                 selection: SelectionState::new(),
                 last_wrapped_content: RefCell::new(None),
+                scrollbar_dragging: false,
             },
             process_cmd_tx,
             process_event_rx: Some(process_event_rx),
@@ -464,6 +467,13 @@ impl App {
             && row >= log_area.y
             && row < log_area.y + log_area.height;
 
+        // Scrollbar: rightmost column of log area, between top/bottom borders
+        let on_scrollbar = self.state.last_max_scroll.get() > 0
+            && log_area.width > 0
+            && col == log_area.x + log_area.width - 1
+            && row > log_area.y
+            && row < log_area.y + log_area.height.saturating_sub(1);
+
         match mouse.kind {
             MouseEventKind::ScrollUp => {
                 if in_log_area || in_task_list {
@@ -476,7 +486,10 @@ impl App {
                 }
             }
             MouseEventKind::Down(MouseButton::Left) => {
-                if in_log_area {
+                if on_scrollbar {
+                    self.state.scrollbar_dragging = true;
+                    self.scroll_to_mouse_y(row);
+                } else if in_log_area {
                     let mode = if mouse.modifiers.contains(KeyModifiers::ALT) {
                         SelectionMode::Block
                     } else {
@@ -491,7 +504,9 @@ impl App {
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) => {
-                if let SelectionState::Selecting {
+                if self.state.scrollbar_dragging {
+                    self.scroll_to_mouse_y(row);
+                } else if let SelectionState::Selecting {
                     ref mut current, ..
                 } = self.state.selection
                 {
@@ -499,7 +514,9 @@ impl App {
                 }
             }
             MouseEventKind::Up(MouseButton::Left) => {
-                if let Some((anchor, current, _)) = self.state.selection.selecting_range() {
+                if self.state.scrollbar_dragging {
+                    self.state.scrollbar_dragging = false;
+                } else if let Some((anchor, current, _)) = self.state.selection.selecting_range() {
                     if anchor == current {
                         // Single click (no drag) — clear selection
                         self.state.selection.clear();
@@ -516,6 +533,30 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    fn scroll_to_mouse_y(&mut self, row: u16) {
+        let log_area = self.state.last_log_area.get();
+        let max_scroll = self.state.last_max_scroll.get();
+        if max_scroll == 0 {
+            return;
+        }
+
+        // Track area: inner rows between top and bottom borders
+        let track_start = log_area.y + 1;
+        let track_end = log_area.y + log_area.height.saturating_sub(2);
+        if track_start >= track_end {
+            return;
+        }
+
+        let clamped_row = row.clamp(track_start, track_end);
+        let track_height = (track_end - track_start) as f64;
+        let ratio = (clamped_row - track_start) as f64 / track_height;
+        let new_offset = (ratio * max_scroll as f64).round() as usize;
+
+        self.state.selection.clear();
+        self.state.log_scroll_offset = new_offset.min(max_scroll);
+        self.state.auto_scroll = self.state.log_scroll_offset >= max_scroll;
     }
 
     fn copy_selection(&mut self) {
