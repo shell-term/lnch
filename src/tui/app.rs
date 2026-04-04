@@ -181,11 +181,14 @@ impl App {
             }
         });
 
-        // Spawn background update checker
+        // Spawn periodic update checker (immediate + every 1 hour)
         let update_tx = self.app_event_tx.clone();
         tokio::spawn(async move {
-            if let Some(info) = crate::update::checker::check_for_update().await {
-                let _ = update_tx.send(AppEvent::UpdateAvailable(info)).await;
+            loop {
+                if let Some(info) = crate::update::checker::check_for_update().await {
+                    let _ = update_tx.send(AppEvent::UpdateAvailable(info)).await;
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(60 * 60)).await;
             }
         });
 
