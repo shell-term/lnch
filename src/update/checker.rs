@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 const GITHUB_API_URL: &str =
     "https://api.github.com/repos/shell-term/lnch/releases/latest";
-const CACHE_TTL_SECS: u64 = 24 * 60 * 60; // 24 hours
+const CACHE_TTL_SECS: u64 = 60 * 60; // 1 hour
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // -- Public types -----------------------------------------------------------
