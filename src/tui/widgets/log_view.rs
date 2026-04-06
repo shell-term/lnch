@@ -4,6 +4,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
 use crate::log::buffer::LogBuffer;
+use crate::tui::search::SearchState;
 use crate::tui::selection::{SelectionMode, SelectionState};
 use crate::tui::widgets::line_wrapper::{col_to_byte_offset, wrap_log_lines, WrappedContent};
 
@@ -16,6 +17,7 @@ pub fn render_log_view(
     max_scroll_out: &Cell<usize>,
     selection: &SelectionState,
     wrapped_content_out: &RefCell<Option<WrappedContent>>,
+    search: &SearchState,
 ) {
     let visible_height = area.height.saturating_sub(2) as usize;
     // inner_width: borders (2) + scrollbar track (1)
@@ -41,7 +43,10 @@ pub fn render_log_view(
     // Resolve selection range for highlighting.
     let sel_info = resolve_selection(selection, &wrapped, area, effective_scroll);
 
-    // Build visible lines with selection highlighting.
+    // Collect search match highlight ranges for visible lines.
+    let search_highlights = resolve_search_highlights(search, &wrapped, effective_scroll, visible_height);
+
+    // Build visible lines with selection + search highlighting.
     let end = (effective_scroll + visible_height).min(total_visual_lines);
     let visible_visual_lines = &wrapped.visual_lines[effective_scroll..end];
 
@@ -55,13 +60,58 @@ pub fn render_log_view(
                 Style::default()
             };
             let abs_vl_idx = effective_scroll + screen_row;
-            build_line_with_highlight(&vl.text, base_style, abs_vl_idx, &sel_info, inner_width)
+            let search_ranges: Vec<&SearchHighlight> = search_highlights
+                .iter()
+                .filter(|h| h.visual_line_index == abs_vl_idx)
+                .collect();
+            build_line_with_highlight(
+                &vl.text, base_style, abs_vl_idx, &sel_info, inner_width, &search_ranges,
+            )
         })
         .collect();
 
+    // Build bottom title: search bar or position indicator
+    let bottom_title = if search.active {
+        let match_info = if search.matches.is_empty() {
+            if search.query.is_empty() {
+                String::new()
+            } else {
+                " [0/0] ".to_string()
+            }
+        } else {
+            let idx = search.current_index.map(|i| i + 1).unwrap_or(0);
+            format!(" [{}/{}] ", idx, search.matches.len())
+        };
+        Line::from(vec![
+            Span::styled(
+                format!(" /{}", search.query),
+                Style::default().fg(Color::Yellow).bold(),
+            ),
+            Span::styled(
+                "\u{2588}",
+                Style::default().fg(Color::Yellow),
+            ),
+            Span::raw(" "),
+            Span::raw(match_info),
+        ])
+    } else if search.has_results() {
+        let idx = search.current_index.map(|i| i + 1).unwrap_or(0);
+        let match_info = format!(" [{}/{}] ", idx, search.matches.len());
+        Line::from(vec![
+            Span::styled(
+                format!(" /{} ", search.query),
+                Style::default().fg(Color::Yellow),
+            ),
+            Span::raw(match_info),
+            Span::raw(position_text),
+        ])
+    } else {
+        Line::from(position_text).right_aligned()
+    };
+
     let block = Block::default()
         .title(format!(" Logs: [{}] ", task_name))
-        .title_bottom(Line::from(position_text).right_aligned())
+        .title_bottom(bottom_title)
         .borders(Borders::ALL);
 
     // No .wrap() and no .scroll() — lines are already pre-wrapped and sliced.
@@ -166,18 +216,106 @@ fn resolve_selection(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Search highlight helpers
+// ---------------------------------------------------------------------------
+
+struct SearchHighlight {
+    visual_line_index: usize,
+    byte_start: usize,
+    byte_end: usize,
+    is_current: bool,
+}
+
+fn resolve_search_highlights(
+    search: &SearchState,
+    wrapped: &WrappedContent,
+    effective_scroll: usize,
+    visible_height: usize,
+) -> Vec<SearchHighlight> {
+    if !search.has_query() || search.matches.is_empty() {
+        return Vec::new();
+    }
+
+    let end_vl = (effective_scroll + visible_height).min(wrapped.visual_lines.len());
+    let mut highlights = Vec::new();
+
+    for (match_idx, m) in search.matches.iter().enumerate() {
+        let is_current = search.current_index == Some(match_idx);
+
+        // Find all visual lines that belong to this logical line and overlap the match.
+        for (vl_idx, vl) in wrapped.visual_lines.iter().enumerate() {
+            if vl_idx < effective_scroll {
+                continue;
+            }
+            if vl_idx >= end_vl {
+                break;
+            }
+            if vl.logical_line_index != m.logical_line_index {
+                continue;
+            }
+            // Check overlap between match [m.byte_start, m.byte_end) and visual line [vl.byte_start, vl.byte_end)
+            if m.byte_start >= vl.byte_end || m.byte_end <= vl.byte_start {
+                continue;
+            }
+            let hi_start = m.byte_start.max(vl.byte_start) - vl.byte_start;
+            let hi_end = m.byte_end.min(vl.byte_end) - vl.byte_start;
+            if hi_start < hi_end {
+                highlights.push(SearchHighlight {
+                    visual_line_index: vl_idx,
+                    byte_start: hi_start,
+                    byte_end: hi_end,
+                    is_current,
+                });
+            }
+        }
+    }
+
+    highlights
+}
+
+// ---------------------------------------------------------------------------
+// Line building with selection + search highlights
+// ---------------------------------------------------------------------------
+
+const SEARCH_MATCH_STYLE: Style = Style::new().fg(Color::Black).bg(Color::Yellow);
+const SEARCH_CURRENT_STYLE: Style = Style::new().fg(Color::Black).bg(Color::LightRed);
+
 fn build_line_with_highlight<'a>(
     text: &str,
     base_style: Style,
     abs_vl_idx: usize,
     sel_info: &SelectionInfo,
     _inner_width: usize,
+    search_highlights: &[&SearchHighlight],
 ) -> Line<'a> {
-    let highlight_style = base_style.add_modifier(Modifier::REVERSED);
+    let sel_highlight_style = base_style.add_modifier(Modifier::REVERSED);
 
+    // Determine selection byte range for this line.
+    let sel_range = resolve_selection_range(text, abs_vl_idx, sel_info, _inner_width);
+
+    // If selection is active on this line, selection takes priority over search.
+    if let Some((sel_start, sel_end)) = sel_range {
+        return split_spans(text, sel_start, sel_end, base_style, sel_highlight_style);
+    }
+
+    // Apply search highlights.
+    if search_highlights.is_empty() {
+        return Line::styled(text.to_string(), base_style);
+    }
+
+    build_search_highlighted_line(text, base_style, search_highlights)
+}
+
+/// Extract the selection byte range for a given visual line, if any.
+fn resolve_selection_range(
+    text: &str,
+    abs_vl_idx: usize,
+    sel_info: &SelectionInfo,
+    _inner_width: usize,
+) -> Option<(usize, usize)> {
     match sel_info {
-        SelectionInfo::None => Line::styled(text.to_string(), base_style),
-
+        SelectionInfo::None => None,
         SelectionInfo::Normal {
             start_vl,
             start_byte,
@@ -185,30 +323,23 @@ fn build_line_with_highlight<'a>(
             end_byte,
         } => {
             if abs_vl_idx < *start_vl || abs_vl_idx > *end_vl {
-                return Line::styled(text.to_string(), base_style);
+                return None;
             }
-
             let (sel_start, sel_end) = if abs_vl_idx == *start_vl && abs_vl_idx == *end_vl {
-                (
-                    (*start_byte).min(text.len()),
-                    (*end_byte).min(text.len()),
-                )
+                ((*start_byte).min(text.len()), (*end_byte).min(text.len()))
             } else if abs_vl_idx == *start_vl {
                 ((*start_byte).min(text.len()), text.len())
             } else if abs_vl_idx == *end_vl {
                 (0, (*end_byte).min(text.len()))
             } else {
-                // Middle line — fully selected
                 (0, text.len())
             };
-
             if sel_start == sel_end {
-                return Line::styled(text.to_string(), base_style);
+                None
+            } else {
+                Some((sel_start, sel_end))
             }
-
-            split_spans(text, sel_start, sel_end, base_style, highlight_style)
         }
-
         SelectionInfo::Block {
             start_vl,
             end_vl,
@@ -216,19 +347,54 @@ fn build_line_with_highlight<'a>(
             col_hi,
         } => {
             if abs_vl_idx < *start_vl || abs_vl_idx > *end_vl {
-                return Line::styled(text.to_string(), base_style);
+                return None;
             }
-
             let byte_lo = col_to_byte_offset(text, *col_lo);
             let byte_hi = col_to_byte_offset(text, *col_hi);
-
             if byte_lo == byte_hi {
-                return Line::styled(text.to_string(), base_style);
+                None
+            } else {
+                Some((byte_lo, byte_hi))
             }
-
-            split_spans(text, byte_lo, byte_hi, base_style, highlight_style)
         }
     }
+}
+
+/// Build a Line with multiple search highlights applied.
+fn build_search_highlighted_line<'a>(
+    text: &str,
+    base_style: Style,
+    highlights: &[&SearchHighlight],
+) -> Line<'a> {
+    // Merge overlapping highlights and sort by start position.
+    let mut ranges: Vec<(usize, usize, bool)> = highlights
+        .iter()
+        .map(|h| (h.byte_start.min(text.len()), h.byte_end.min(text.len()), h.is_current))
+        .filter(|(s, e, _)| s < e)
+        .collect();
+    ranges.sort_by_key(|r| r.0);
+
+    let mut spans = Vec::new();
+    let mut pos = 0;
+
+    for (start, end, is_current) in &ranges {
+        if *start > pos {
+            spans.push(Span::styled(text[pos..*start].to_string(), base_style));
+        }
+        let style = if *is_current {
+            SEARCH_CURRENT_STYLE
+        } else {
+            SEARCH_MATCH_STYLE
+        };
+        spans.push(Span::styled(text[*start..*end].to_string(), style));
+        pos = *end;
+    }
+
+    if pos < text.len() {
+        spans.push(Span::styled(text[pos..].to_string(), base_style));
+    }
+
+    Line::from(spans)
 }
 
 fn split_spans<'a>(

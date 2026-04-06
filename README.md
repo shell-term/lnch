@@ -22,7 +22,7 @@ A TUI multi-process launcher for your dev environment — manage all your local 
 - **TUI dashboard** — Monitor process status and logs in a split-pane terminal UI powered by [ratatui](https://github.com/ratatui/ratatui)
 - **Dependency ordering** — `depends_on` ensures services start in the right order via topological sort, with readiness checks (`ready_check`) to wait until dependencies are actually ready
 - **Auto-discovery** — `lnch` searches up the directory tree for `lnch.yaml`, so it works from any subdirectory
-- **Per-task logs** — stdout/stderr captured in ring buffers with color-coded display
+- **Per-task logs** — stdout/stderr captured in ring buffers with color-coded display; vim-style `/` search with incremental highlighting
 - **Graceful shutdown** — SIGTERM with timeout, then SIGKILL; process groups ensure no orphan processes
 - **Cross-platform** — macOS, Linux (including WSL), and Windows
 - **Update notifications** — Automatically checks for new releases on startup; press `u` to install the update directly from the TUI
@@ -120,6 +120,9 @@ lnch --help              # Show help
 | `Home` | Scroll to top of logs |
 | `End` | Scroll to bottom (resume auto-scroll) |
 | `c` | Clear logs of selected task |
+| `/` | Search logs |
+| `n` / `N` | Jump to next/previous search match |
+| `Esc` | Cancel search / clear highlights |
 | `u` | Update lnch (shown when a new version is available) |
 | `q` / `Ctrl+C` | Quit (graceful shutdown) |
 
@@ -219,20 +222,20 @@ See [`docs/`](docs/) for detailed design documents (in Japanese).
 | YAML config | ✅ | ✅ |
 | Auto-discovery (walk up directory tree) | ❌ | ✅ |
 | `depends_on` startup ordering | ❌ | ✅ |
-| Global profiles (multi-project) | ❌ | ✅ (v0.2) |
-| TUI config editing | ❌ | ✅ (v0.3) |
-| `init` command with templates | ❌ | ✅ (v0.4) |
-| Health checks & auto-restart | ❌ | ✅ (v0.5) |
+| Log search (`/`, `n`/`N`) | ❌ | ✅ |
+| `init` command | ❌ | ✅ (v0.3) |
+| Log file output | ❌ | ✅ (v0.4) |
+| Auto-restart policies | ❌ | ✅ (v0.5) |
 
 ## Roadmap
 
 | Version | Focus | Status |
 |---------|-------|--------|
-| **v0.1** | MVP — YAML config, TUI, process management, `depends_on` | 🚧 In Progress |
-| **v0.2** | Global profiles (`~/.config/lnch/profiles.yaml`) | Planned |
-| **v0.3** | TUI-based config editing | Planned |
-| **v0.4** | `lnch init` with interactive prompts & templates | Planned |
-| **v0.5** | Health checks & auto-restart policies | Planned |
+| **v0.1** | MVP — YAML config, TUI, process management, `depends_on` | ✅ Done |
+| **v0.2** | Log search + config reload | 🚧 In Progress |
+| **v0.3** | `lnch init` with interactive prompts | Planned |
+| **v0.4** | Log file output | Planned |
+| **v0.5** | Auto-restart policies | Planned |
 
 ## Contributing
 

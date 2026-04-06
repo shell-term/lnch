@@ -26,6 +26,8 @@ pub fn render_status_bar(frame: &mut Frame, area: Rect, update_available: bool, 
         Span::raw(" Restart  "),
         Span::styled("[↑↓]", Style::default().fg(Color::Yellow).bold()),
         Span::raw(" Select  "),
+        Span::styled("[/]", Style::default().fg(Color::Yellow).bold()),
+        Span::raw(" Search  "),
         Span::styled("[c]", Style::default().fg(Color::Yellow).bold()),
         Span::raw(" Clear  "),
     ];
