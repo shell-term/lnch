@@ -1,7 +1,9 @@
 use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
 
-pub fn render_status_bar(frame: &mut Frame, area: Rect, update_available: bool, confirm_quit: bool, show_copied: bool, show_selected: bool) {
+use crate::tui::app::StatusFeedback;
+
+pub fn render_status_bar(frame: &mut Frame, area: Rect, update_available: bool, confirm_quit: bool, show_copied: bool, show_selected: bool, status_feedback: Option<&StatusFeedback>) {
     if confirm_quit {
         let spans = vec![
             Span::styled(" Processes are still running. ", Style::default().fg(Color::Yellow)),
@@ -40,7 +42,15 @@ pub fn render_status_bar(frame: &mut Frame, area: Rect, update_available: bool, 
     spans.push(Span::styled("[q]", Style::default().fg(Color::Yellow).bold()));
     spans.push(Span::raw(" Quit"));
 
-    if show_copied {
+    if let Some(fb) = status_feedback {
+        spans.push(Span::raw("  "));
+        let style = if fb.is_error {
+            Style::default().fg(Color::White).bg(Color::Red).bold()
+        } else {
+            Style::default().fg(Color::Black).bg(Color::Green).bold()
+        };
+        spans.push(Span::styled(format!(" {} ", fb.message), style));
+    } else if show_copied {
         spans.push(Span::raw("  "));
         spans.push(Span::styled(
             " Copied! ",

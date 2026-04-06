@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use tokio::sync::mpsc;
 
@@ -59,6 +59,10 @@ impl ProcessManager {
                     tracing::info!("Shutdown requested, stopping all tasks");
                     self.stop_all().await;
                     break;
+                }
+                ProcessCommand::Reload(new_config) => {
+                    tracing::info!("Config reload requested");
+                    self.handle_reload(new_config).await;
                 }
             }
         }
@@ -142,6 +146,54 @@ impl ProcessManager {
             .collect();
 
         futures::future::join_all(futures).await;
+    }
+
+    async fn handle_reload(&mut self, new_config: LnchConfig) {
+        let new_names: HashSet<String> =
+            new_config.tasks.iter().map(|t| t.name.clone()).collect();
+        let old_names: HashSet<String> = self.runners.keys().cloned().collect();
+
+        let new_config_map: HashMap<&str, &crate::config::model::TaskConfig> = new_config
+            .tasks
+            .iter()
+            .map(|t| (t.name.as_str(), t))
+            .collect();
+
+        // 1. Stop and remove runners for deleted tasks
+        for name in old_names.difference(&new_names) {
+            self.stop_task(name).await;
+            self.runners.remove(name.as_str());
+            tracing::info!(task = %name, "Removed task runner");
+        }
+
+        // 2. Stop and replace runners for changed tasks
+        let common: Vec<String> = old_names.intersection(&new_names).cloned().collect();
+        for name in &common {
+            let new_task_config = new_config_map[name.as_str()];
+            if self.runners[name].config_ref() != new_task_config {
+                self.stop_task(name).await;
+                self.runners.remove(name.as_str());
+                let runner = TaskRunner::new(new_task_config.clone(), self.event_tx.clone());
+                self.runners.insert(name.clone(), runner);
+                tracing::info!(task = %name, "Replaced task runner (config changed)");
+            }
+        }
+
+        // 3. Add runners for new tasks (stopped state, not started)
+        for name in new_names.difference(&old_names) {
+            let task_config = new_config_map[name.as_str()];
+            let runner = TaskRunner::new(task_config.clone(), self.event_tx.clone());
+            self.runners.insert(name.clone(), runner);
+            tracing::info!(task = %name, "Added new task runner");
+        }
+
+        // 4. Rebuild dependency graph
+        match DependencyGraph::from_config(&new_config) {
+            Ok(graph) => self.dependency_graph = graph,
+            Err(e) => {
+                tracing::error!(error = %e, "Failed to rebuild dependency graph during reload");
+            }
+        }
     }
 
     async fn stop_all(&mut self) {

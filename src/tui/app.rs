@@ -1,7 +1,9 @@
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::io;
 use std::panic;
-use std::time::Instant;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use crossterm::event::{
     DisableMouseCapture, EnableMouseCapture, KeyCode, KeyModifiers, MouseButton, MouseEventKind,
@@ -66,6 +68,13 @@ pub struct TaskState {
     pub log_buffer: LogBuffer,
 }
 
+/// Transient status bar feedback (e.g., "Reloaded!", "Reload failed: ...").
+pub struct StatusFeedback {
+    pub message: String,
+    pub is_error: bool,
+    pub expires_at: Instant,
+}
+
 pub struct AppState {
     pub project_name: String,
     pub tasks: Vec<TaskState>,
@@ -90,6 +99,8 @@ pub struct AppState {
     pub scrollbar_dragging: bool,
     /// Log search state.
     pub search: SearchState,
+    /// Transient status bar feedback message.
+    pub status_feedback: Option<StatusFeedback>,
 }
 
 pub struct App {
@@ -99,11 +110,13 @@ pub struct App {
     app_event_rx: Option<mpsc::Receiver<AppEvent>>,
     app_event_tx: mpsc::Sender<AppEvent>,
     update_on_exit: Option<UpdateInfo>,
+    config_path: PathBuf,
 }
 
 impl App {
     pub fn new(
         config: &LnchConfig,
+        config_path: PathBuf,
         process_cmd_tx: mpsc::Sender<ProcessCommand>,
         process_event_rx: mpsc::Receiver<ProcessEvent>,
     ) -> Self {
@@ -136,12 +149,14 @@ impl App {
                 last_wrapped_content: RefCell::new(None),
                 scrollbar_dragging: false,
                 search: SearchState::new(),
+                status_feedback: None,
             },
             process_cmd_tx,
             process_event_rx: Some(process_event_rx),
             app_event_rx: Some(app_event_rx),
             app_event_tx,
             update_on_exit: None,
+            config_path,
         }
     }
 
@@ -237,6 +252,11 @@ impl App {
             }
             AppEvent::Tick => {
                 self.state.selection.tick();
+                if let Some(ref fb) = self.state.status_feedback {
+                    if Instant::now() >= fb.expires_at {
+                        self.state.status_feedback = None;
+                    }
+                }
             }
             AppEvent::Process(event) => {
                 self.handle_process_event(event);
@@ -366,6 +386,11 @@ impl App {
                 if self.state.search.has_query() {
                     self.state.search.clear_highlights();
                 }
+            }
+
+            // Config reload
+            KeyCode::Char('R') => {
+                self.reload_config().await;
             }
 
             _ => {}
@@ -734,6 +759,153 @@ impl App {
             self.state.log_scroll_offset = new_offset.min(max_scroll);
         }
         self.state.auto_scroll = false;
+    }
+
+    async fn reload_config(&mut self) {
+        use crate::config::loader::{config_base_dir, load_config, resolve_working_dirs};
+        use crate::config::validator::validate_config;
+        use crate::process::dependency::DependencyGraph;
+
+        // 1. Load config from disk
+        let mut new_config = match load_config(&self.config_path) {
+            Ok(c) => c,
+            Err(e) => {
+                self.state.status_feedback = Some(StatusFeedback {
+                    message: format!("Reload failed: {}", e),
+                    is_error: true,
+                    expires_at: Instant::now() + Duration::from_secs(5),
+                });
+                return;
+            }
+        };
+
+        // 2. Validate
+        let base_dir = config_base_dir(&self.config_path);
+        if let Err(e) = validate_config(&new_config, &base_dir) {
+            self.state.status_feedback = Some(StatusFeedback {
+                message: format!("Reload failed: {}", e),
+                is_error: true,
+                expires_at: Instant::now() + Duration::from_secs(5),
+            });
+            return;
+        }
+
+        // 3. Resolve working dirs
+        resolve_working_dirs(&mut new_config, &base_dir);
+
+        // 4. Validate dependency graph
+        if let Err(e) = DependencyGraph::from_config(&new_config) {
+            self.state.status_feedback = Some(StatusFeedback {
+                message: format!("Reload failed: {}", e),
+                is_error: true,
+                expires_at: Instant::now() + Duration::from_secs(5),
+            });
+            return;
+        }
+
+        // 5. Compute diff for feedback
+        let old_names: std::collections::HashSet<&str> = self
+            .state
+            .tasks
+            .iter()
+            .map(|t| t.config.name.as_str())
+            .collect();
+        let new_names: std::collections::HashSet<&str> =
+            new_config.tasks.iter().map(|t| t.name.as_str()).collect();
+        let added = new_names.difference(&old_names).count();
+        let removed = old_names.difference(&new_names).count();
+        let changed = new_config
+            .tasks
+            .iter()
+            .filter(|nt| {
+                self.state
+                    .tasks
+                    .iter()
+                    .any(|ot| ot.config.name == nt.name && ot.config != **nt)
+            })
+            .count();
+
+        if added == 0 && removed == 0 && changed == 0 {
+            self.state.status_feedback = Some(StatusFeedback {
+                message: "No config changes detected".to_string(),
+                is_error: false,
+                expires_at: Instant::now() + Duration::from_secs(3),
+            });
+            return;
+        }
+
+        // 6. Apply to App state
+        self.apply_config_to_app_state(&new_config);
+
+        // 7. Send to ProcessManager
+        let _ = self
+            .process_cmd_tx
+            .send(ProcessCommand::Reload(new_config))
+            .await;
+
+        // 8. Show success feedback
+        let mut parts = Vec::new();
+        if added > 0 {
+            parts.push(format!("{} added", added));
+        }
+        if removed > 0 {
+            parts.push(format!("{} removed", removed));
+        }
+        if changed > 0 {
+            parts.push(format!("{} changed", changed));
+        }
+        self.state.status_feedback = Some(StatusFeedback {
+            message: format!("Reloaded: {}", parts.join(", ")),
+            is_error: false,
+            expires_at: Instant::now() + Duration::from_secs(3),
+        });
+    }
+
+    fn apply_config_to_app_state(&mut self, new_config: &LnchConfig) {
+        // Drain old tasks into a map for O(1) lookup, preserving LogBuffer (not Clone).
+        let mut old_tasks: HashMap<String, TaskState> = self
+            .state
+            .tasks
+            .drain(..)
+            .map(|t| (t.config.name.clone(), t))
+            .collect();
+
+        let mut new_tasks = Vec::new();
+        for new_task_config in &new_config.tasks {
+            if let Some(old_task) = old_tasks.remove(&new_task_config.name) {
+                if old_task.config == *new_task_config {
+                    // Unchanged: preserve status + logs
+                    new_tasks.push(old_task);
+                } else {
+                    // Changed: fresh state, ProcessManager will handle restart
+                    new_tasks.push(TaskState {
+                        config: new_task_config.clone(),
+                        status: TaskStatus::Stopped,
+                        log_buffer: LogBuffer::with_default_capacity(),
+                    });
+                }
+            } else {
+                // Added: new task in stopped state
+                new_tasks.push(TaskState {
+                    config: new_task_config.clone(),
+                    status: TaskStatus::Stopped,
+                    log_buffer: LogBuffer::with_default_capacity(),
+                });
+            }
+        }
+        // Remaining old_tasks entries are removed — dropped here.
+
+        self.state.tasks = new_tasks;
+        self.state.project_name = new_config.name.clone();
+
+        // Fix selected_index if out of bounds
+        if self.state.selected_index >= self.state.tasks.len() {
+            self.state.selected_index = self.state.tasks.len().saturating_sub(1);
+        }
+
+        self.state.selection.clear();
+        self.reset_scroll();
+        self.refresh_search();
     }
 
     fn select_task(&mut self, index: usize) {

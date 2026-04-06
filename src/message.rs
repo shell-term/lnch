@@ -1,5 +1,6 @@
 use crossterm::event::{KeyEvent, MouseEvent};
 
+use crate::config::model::LnchConfig;
 use crate::update::checker::UpdateInfo;
 
 /// Runtime status of a task
@@ -22,6 +23,7 @@ pub enum ProcessCommand {
     StartAll,
     StopAll,
     Shutdown,
+    Reload(LnchConfig),
 }
 
 /// Events from ProcessManager -> App

@@ -126,5 +126,6 @@ pub fn render(frame: &mut Frame, state: &AppState) {
         state.confirm_quit,
         state.selection.show_copied(),
         state.selection.is_selected(),
+        state.status_feedback.as_ref(),
     );
 }

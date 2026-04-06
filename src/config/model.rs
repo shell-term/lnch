@@ -2,13 +2,13 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct LnchConfig {
     pub name: String,
     pub tasks: Vec<TaskConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct TaskConfig {
     pub name: String,
     pub command: String,
@@ -19,7 +19,7 @@ pub struct TaskConfig {
     pub ready_check: Option<ReadyCheckConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct ReadyCheckConfig {
     pub tcp: Option<TcpCheck>,
     pub http: Option<HttpCheck>,
@@ -31,23 +31,23 @@ pub struct ReadyCheckConfig {
     pub interval: Option<u64>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct TcpCheck {
     pub port: u16,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct HttpCheck {
     pub url: String,
     pub status: Option<u16>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct LogLineCheck {
     pub pattern: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct ExitCheck {}
 
 impl ReadyCheckConfig {
