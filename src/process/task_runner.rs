@@ -267,6 +267,10 @@ impl TaskRunner {
         self.exit_monitor.as_ref().is_some_and(|h| !h.is_finished())
     }
 
+    pub fn config_ref(&self) -> &TaskConfig {
+        &self.config
+    }
+
     // ------------------------------------------------------------------
     // Exit monitor (pipe mode)
     // ------------------------------------------------------------------

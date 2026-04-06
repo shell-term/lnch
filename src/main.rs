@@ -79,7 +79,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // Run TUI application
-    let app = App::new(&config, cmd_tx, event_rx);
+    let app = App::new(&config, config_path, cmd_tx, event_rx);
     app.run().await?;
 
     Ok(())

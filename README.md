@@ -123,6 +123,7 @@ lnch --help              # Show help
 | `/` | Search logs |
 | `n` / `N` | Jump to next/previous search match |
 | `Esc` | Cancel search / clear highlights |
+| `Shift+R` | Reload config file |
 | `u` | Update lnch (shown when a new version is available) |
 | `q` / `Ctrl+C` | Quit (graceful shutdown) |
 
@@ -223,6 +224,7 @@ See [`docs/`](docs/) for detailed design documents (in Japanese).
 | Auto-discovery (walk up directory tree) | ❌ | ✅ |
 | `depends_on` startup ordering | ❌ | ✅ |
 | Log search (`/`, `n`/`N`) | ❌ | ✅ |
+| Config hot-reload (`Shift+R`) | ❌ | ✅ |
 | `init` command | ❌ | ✅ (v0.3) |
 | Log file output | ❌ | ✅ (v0.4) |
 | Auto-restart policies | ❌ | ✅ (v0.5) |
