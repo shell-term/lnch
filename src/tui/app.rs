@@ -20,6 +20,7 @@ use crate::update::checker::UpdateInfo;
 
 use super::clipboard;
 use super::event::{should_quit, spawn_event_reader};
+use super::search::SearchState;
 use super::selection::{ScreenPos, SelectionMode, SelectionState};
 use super::ui;
 use super::widgets::line_wrapper::WrappedContent;
@@ -87,6 +88,8 @@ pub struct AppState {
     pub last_wrapped_content: RefCell<Option<WrappedContent>>,
     /// True while the user is dragging the scrollbar thumb.
     pub scrollbar_dragging: bool,
+    /// Log search state.
+    pub search: SearchState,
 }
 
 pub struct App {
@@ -132,6 +135,7 @@ impl App {
                 selection: SelectionState::new(),
                 last_wrapped_content: RefCell::new(None),
                 scrollbar_dragging: false,
+                search: SearchState::new(),
             },
             process_cmd_tx,
             process_event_rx: Some(process_event_rx),
@@ -261,6 +265,29 @@ impl App {
             return;
         }
 
+        // Handle search input mode — captures all keys except Esc/Enter
+        if self.state.search.active {
+            match key.code {
+                KeyCode::Esc => {
+                    self.state.search.cancel();
+                }
+                KeyCode::Enter => {
+                    self.state.search.confirm();
+                    self.jump_to_current_match();
+                }
+                KeyCode::Backspace => {
+                    self.state.search.query.pop();
+                    self.refresh_search();
+                }
+                KeyCode::Char(c) => {
+                    self.state.search.query.push(c);
+                    self.refresh_search();
+                }
+                _ => {}
+            }
+            return;
+        }
+
         // Ctrl+C with active selection → copy instead of quit
         if key.code == KeyCode::Char('c')
             && key.modifiers.contains(KeyModifiers::CONTROL)
@@ -323,6 +350,24 @@ impl App {
                 }
             }
 
+            // Search
+            KeyCode::Char('/') => {
+                self.state.search.activate();
+            }
+            KeyCode::Char('n') => {
+                self.state.search.next_match();
+                self.jump_to_current_match();
+            }
+            KeyCode::Char('N') => {
+                self.state.search.prev_match();
+                self.jump_to_current_match();
+            }
+            KeyCode::Esc => {
+                if self.state.search.has_query() {
+                    self.state.search.clear_highlights();
+                }
+            }
+
             _ => {}
         }
     }
@@ -370,6 +415,7 @@ impl App {
             self.state.selection.clear();
             self.state.selected_index -= 1;
             self.reset_scroll();
+            self.refresh_search();
         }
     }
 
@@ -378,6 +424,7 @@ impl App {
             self.state.selection.clear();
             self.state.selected_index += 1;
             self.reset_scroll();
+            self.refresh_search();
         }
     }
 
@@ -425,6 +472,7 @@ impl App {
             self.state.log_scroll_offset = 0;
             self.state.auto_scroll = true;
         }
+        self.refresh_search();
     }
 
     fn selected_task_name(&self) -> String {
@@ -638,11 +686,62 @@ impl App {
         }
     }
 
+    /// Recompute search matches against the current task's log buffer.
+    fn refresh_search(&mut self) {
+        if !self.state.search.has_query() {
+            return;
+        }
+        if let Some(task) = self.state.tasks.get(self.state.selected_index) {
+            self.state.search.update_matches(task.log_buffer.lines());
+        }
+    }
+
+    /// Scroll the log view so the current search match is visible.
+    fn jump_to_current_match(&mut self) {
+        let current_match = match self.state.search.current_match() {
+            Some(m) => m.clone(),
+            None => return,
+        };
+
+        // Find the visual line for this match by looking at the cached wrapped content.
+        let wrapped_ref = self.state.last_wrapped_content.borrow();
+        let wrapped = match wrapped_ref.as_ref() {
+            Some(w) => w,
+            None => return,
+        };
+
+        // Find the first visual line that contains this match.
+        let target_vl = wrapped
+            .visual_lines
+            .iter()
+            .position(|vl| {
+                vl.logical_line_index == current_match.logical_line_index
+                    && vl.byte_start <= current_match.byte_start
+                    && vl.byte_end > current_match.byte_start
+            })
+            .unwrap_or(0);
+
+        let log_area = self.state.last_log_area.get();
+        let visible_height = log_area.height.saturating_sub(2) as usize;
+        let max_scroll = wrapped.max_scroll;
+
+        drop(wrapped_ref);
+
+        // Center the match on screen if it's outside the visible area.
+        let effective_scroll = self.state.log_scroll_offset.min(max_scroll);
+        if target_vl < effective_scroll || target_vl >= effective_scroll + visible_height {
+            let new_offset = target_vl.saturating_sub(visible_height / 2);
+            self.state.log_scroll_offset = new_offset.min(max_scroll);
+        }
+        self.state.auto_scroll = false;
+    }
+
     fn select_task(&mut self, index: usize) {
         if index < self.state.tasks.len() && index != self.state.selected_index {
             self.state.selection.clear();
             self.state.selected_index = index;
             self.reset_scroll();
+            self.refresh_search();
         }
     }
 

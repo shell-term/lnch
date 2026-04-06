@@ -110,6 +110,7 @@ pub fn render(frame: &mut Frame, state: &AppState) {
             &state.last_max_scroll,
             &state.selection,
             &state.last_wrapped_content,
+            &state.search,
         );
     } else {
         state.last_max_scroll.set(0);

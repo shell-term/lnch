@@ -4,120 +4,100 @@
 
 | バージョン | 機能 | 概要 |
 |-----------|------|------|
-| **v0.1 (MVP)** | コア機能 | YAMLを手書き → `lnch` でTUI起動 → 一括管理 |
-| **v0.2** | グローバルプロファイル | `~/.config/lnch/profiles.yaml` による複数プロジェクト横断管理 |
-| **v0.3** | TUIからの設定編集 | YAMLを手で書かなくても、TUI上でタスクの追加・編集・削除が完結 |
-| **v0.4** | テンプレート & init | `lnch init` で対話的にYAMLを生成。よく使う構成のテンプレート |
-| **v0.5** | ヘルスチェック & 通知 | ポートの死活監視、プロセスクラッシュ時の自動再起動オプション |
+| **v0.1 (MVP)** | コア機能 | YAMLを手書き → `lnch` でTUI起動 → 一括管理 ✅ |
+| **v0.2** | ログ検索 + 設定リロード | TUI強化と日常の使い勝手向上 |
+| **v0.3** | `lnch init` | 対話的にYAMLを生成 |
+| **v0.4** | ログファイル出力 | タスクごと/全体のログをファイルに保存 |
+| **v0.5** | 自動再起動 | クラッシュ時の自動再起動ポリシー |
 
 ---
 
-## 2. v0.2 — グローバルプロファイル
+## 2. v0.2 — ログ検索 + 設定リロード
 
-**概要**: `~/.config/lnch/profiles.yaml` による複数プロジェクト横断管理
+### ログ検索
 
-**主な変更点:**
-- グローバル設定ファイルのスキーマ定義と読み込み
-- `lnch -p <profile>` オプションの追加
-- `lnch list` サブコマンドの追加（プロファイル一覧表示）
-- ローカル設定とグローバル設定の優先順位ルール
+**概要**: TUI内で vim/less ライクなログ検索機能
 
-**設定ファイル例:**
-
-```yaml
-# ~/.config/lnch/profiles.yaml
-profiles:
-  - name: ses-work
-    tasks:
-      - name: api
-        command: cargo run
-        working_dir: ~/projects/trade-ocr/backend
-      - name: front
-        command: npm run dev
-        working_dir: ~/projects/trade-ocr/frontend
-
-  - name: my-product
-    tasks:
-      - name: lnch-dev
-        command: cargo run
-        working_dir: ~/projects/lnch
-```
-
-**CLI拡張:**
-
-```
-lnch list                # プロファイル一覧
-lnch -p <profile>        # 指定プロファイルでTUI起動
-```
-
----
-
-## 3. v0.3 — TUIからの設定編集
-
-**概要**: TUI上でタスクの追加・編集・削除が完結。YAMLファイルへの書き戻し。
+lnch の強みである TUI ログ閲覧を強化。プロセスが多いほどスクロールだけでは目的の行を探しにくくなるため、検索は実用上大きな価値がある。
 
 **主な変更点:**
-- 設定編集モード用のTUI画面（フォーム入力ウィジェット）
-- YAML書き戻しロジック（コメント保持はベストエフォート）
-- `F2` キーで設定編集モードへ切り替え
+- `/` キーで検索バーを開く
+- `n` / `N` で次/前のマッチへジャンプ
+- マッチ箇所をハイライト表示
+- `Esc` で検索を閉じる
 
-**画面イメージ:**
+### 設定リロード
 
-```
-┌─ lnch: Settings ──────────────────────────────────────────────────┐
-│                                                                    │
-│  Tasks              │  Edit Task: [frontend]                       │
-│  ─────              │  ──────────────────────────────────────────  │
-│  > frontend         │  Name:        [frontend          ]          │
-│    backend          │  Command:     [npm run dev -- --port 3000 ]  │
-│    database         │  Working Dir: [./frontend         ]          │
-│    worker           │  Color:       [green ▼]                      │
-│                     │                                              │
-│  [+] Add Task       │  Env Variables:                              │
-│                     │    NEXT_PUBLIC_API_URL = [http://localho...]  │
-│                     │    [+] Add Variable                          │
-│                     │                                              │
-│                     │  Depends On:  [ ] database  [ ] backend      │
-│                     │                                              │
-│                     │  [Save]  [Cancel]  [Delete Task]             │
-├─────────────────────┴──────────────────────────────────────────────┤
-│ [Tab] Next Field  [Enter] Edit  [Esc] Cancel       [F2] Settings   │
-└────────────────────────────────────────────────────────────────────┘
-```
+**概要**: YAMLを編集後、lnch を再起動せずに反映できる機能
+
+**主な変更点:**
+- キーバインド（例: `F5`）で yaml を再読み込み
+- 追加/削除されたタスクを反映
+- 変更されたタスクは再起動、変更のないタスクはそのまま維持
+- バリデーションエラー時はステータスバーに通知して変更を適用しない
 
 **設計方針:**
-- YAML が常に Single Source of Truth
-- TUI編集時も即座にYAMLファイルへ書き戻し
-- 手書き編集とTUI編集のどちらも可能
+- 手動トリガー（キーバインド）のみ。ファイル監視による自動リロードは将来のオプションとして検討
+- 編集途中の不完全な yaml を読み込むリスクを避ける
 
 ---
 
-## 4. v0.4 — テンプレート & init
+## 3. v0.3 — `lnch init`
 
-**概要**: `lnch init` で対話的にYAMLを生成。よく使う構成のテンプレート。
+**概要**: `lnch init` で対話的にYAMLを生成
+
+設定ファイルが無い場合のエラーメッセージで既に `lnch init` を案内しているため、期待を裏切らないためにも実装する。
 
 **主な変更点:**
 - `lnch init` サブコマンドの追加
 - 対話型プロンプトでプロジェクト名・タスクを入力
-- プリセットテンプレート（Next.js + API, Docker Compose, etc.）
+- `lnch.yaml` を生成
 
 **CLI拡張:**
 
 ```
 lnch init                    # 対話的にlnch.yamlを生成
-lnch init --template nextjs  # テンプレートから生成
 ```
 
 ---
 
-## 5. v0.5 — ヘルスチェック & 自動再起動
+## 4. v0.4 — ログファイル出力
 
-**概要**: ポートの死活監視、プロセスクラッシュ時の自動再起動
+**概要**: タスクのログをファイルに保存
+
+lnch を閉じるとログが消える。デバッグやチームメンバーへの共有のために、ログの永続化を提供する。
+
+**主な変更点:**
+- タスクごとのログファイル出力オプション
+- グローバルオプション `--log-dir` で全タスクのログを一括保存
+
+**設定ファイル拡張例:**
+
+```yaml
+tasks:
+  - name: api
+    command: cargo run
+    log_file: ./logs/api.log
+```
+
+**CLI拡張:**
+
+```
+lnch --log-dir ./logs        # 全タスクのログを指定ディレクトリに保存
+```
+
+---
+
+## 5. v0.5 — 自動再起動
+
+**概要**: プロセスクラッシュ時の自動再起動ポリシー
+
+開発環境だけでなく、本番・ステージング環境での可用性向上にも対応する。
 
 **主な変更点:**
 - タスクごとの `restart` ポリシー設定（`never` / `on_failure` / `always`）
-- `health_check` 設定（HTTP / TCP ポート監視）
 - 自動再起動のバックオフ戦略（指数バックオフ、最大再試行回数）
+- 既存の `ready_check` との連携（再起動後の準備完了判定）
 
 **設定ファイル拡張例:**
 
@@ -126,71 +106,25 @@ tasks:
   - name: backend
     command: cargo run -- --port 8080
     restart: on_failure         # never | on_failure | always
-    max_restarts: 5             # 最大再起動回数
-    health_check:
-      type: tcp                 # tcp | http
-      port: 8080
-      interval: 10s
-      timeout: 5s
+    max_restarts: 5
 ```
 
 ---
 
-## 6. v0.1 MVP 開発スケジュール（3週間）
-
-### Week 1: コアロジック
-
-| # | タスク | 成果物 |
-|---|--------|--------|
-| 1 | Rustプロジェクトセットアップ（Cargo.toml、CI） | プロジェクト骨格 |
-| 2 | 設定ファイルのデータモデル定義 | `config/model.rs` |
-| 3 | YAML読み込み・ファイル探索 | `config/loader.rs` |
-| 4 | バリデーション | `config/validator.rs` |
-| 5 | 依存関係解決（トポロジカルソート） | `process/dependency.rs` |
-| 6 | ログバッファ | `log/buffer.rs` |
-| 7 | ユニットテスト | `tests/config_test.rs`, `tests/dependency_test.rs` |
-
-### Week 2: TUI + プロセス管理
-
-| # | タスク | 成果物 |
-|---|--------|--------|
-| 8 | TaskRunner（プロセス起動・停止・ログ収集） | `process/task_runner.rs` |
-| 9 | ProcessManager（全タスク統括） | `process/manager.rs` |
-| 10 | TUIレイアウト（タスクリスト + ログビュー + ステータスバー） | `tui/ui.rs`, `tui/widgets/` |
-| 11 | イベントループとキーバインド | `tui/app.rs`, `tui/event.rs` |
-| 12 | コアロジックとTUIの結合 | 動作するプロトタイプ |
-
-### Week 3: 仕上げ
-
-| # | タスク | 成果物 |
-|---|--------|--------|
-| 13 | シグナルハンドリング・クリーンアップ | `process/signal.rs` |
-| 14 | プロセスグループによる確実なKill | プラットフォーム別テスト |
-| 15 | `depends_on` の統合テスト | `tests/process_test.rs` |
-| 16 | クロスプラットフォームビルド確認（Mac/Linux） | CI設定 |
-| 17 | `cargo install` 対応 | `Cargo.toml` メタデータ |
-| 18 | README作成・GitHubリポジトリ整備 | `README.md` |
-
----
-
-## 7. マイルストーン
+## 6. マイルストーン
 
 ```
-v0.1 (MVP)  ─── Week 3 完了時点でリリース
+v0.1 (MVP)  ── 完了 ✅
   │
-  │  +2〜3週間
   ▼
-v0.2 (グローバルプロファイル)
+v0.2 (ログ検索 + 設定リロード)
   │
-  │  +2〜3週間
   ▼
-v0.3 (TUI設定編集)
+v0.3 (lnch init)
   │
-  │  +2週間
   ▼
-v0.4 (テンプレート & init)
+v0.4 (ログファイル出力)
   │
-  │  +2〜3週間
   ▼
-v0.5 (ヘルスチェック & 自動再起動)
+v0.5 (自動再起動)
 ```
