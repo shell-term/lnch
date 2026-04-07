@@ -14,6 +14,9 @@ pub struct LogLine {
 pub struct LogBuffer {
     lines: VecDeque<LogLine>,
     capacity: usize,
+    /// Monotonically increasing counter, bumped on every push/clear.
+    /// Used as a cache key for line-wrapping.
+    generation: u64,
 }
 
 impl LogBuffer {
@@ -21,6 +24,7 @@ impl LogBuffer {
         Self {
             lines: VecDeque::with_capacity(capacity.min(1024)),
             capacity,
+            generation: 0,
         }
     }
 
@@ -33,6 +37,7 @@ impl LogBuffer {
             self.lines.pop_front();
         }
         self.lines.push_back(line);
+        self.generation = self.generation.wrapping_add(1);
     }
 
     pub fn lines(&self) -> &VecDeque<LogLine> {
@@ -51,6 +56,11 @@ impl LogBuffer {
 
     pub fn clear(&mut self) {
         self.lines.clear();
+        self.generation = self.generation.wrapping_add(1);
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 }
 

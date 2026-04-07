@@ -912,6 +912,7 @@ impl App {
         if index < self.state.tasks.len() && index != self.state.selected_index {
             self.state.selection.clear();
             self.state.selected_index = index;
+            *self.state.last_wrapped_content.borrow_mut() = None;
             self.reset_scroll();
             self.refresh_search();
         }

@@ -32,6 +32,10 @@ pub struct TextPosition {
 pub struct WrappedContent {
     pub visual_lines: Vec<VisualLine>,
     pub max_scroll: usize,
+    /// Cache key: LogBuffer generation at the time of wrapping.
+    pub cache_generation: u64,
+    /// Cache key: display width used for wrapping.
+    pub cache_width: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -40,10 +44,12 @@ pub struct WrappedContent {
 
 /// Wrap all log lines into visual lines at `max_width` display columns.
 /// `visible_height` is used only to compute `max_scroll`.
+/// `generation` is stored as a cache key for invalidation.
 pub fn wrap_log_lines(
     lines: &VecDeque<LogLine>,
     max_width: usize,
     visible_height: usize,
+    generation: u64,
 ) -> WrappedContent {
     let max_width = max_width.max(1);
     let mut visual_lines = Vec::new();
@@ -64,6 +70,8 @@ pub fn wrap_log_lines(
     WrappedContent {
         visual_lines,
         max_scroll,
+        cache_generation: generation,
+        cache_width: max_width,
     }
 }
 
@@ -320,7 +328,7 @@ mod tests {
     #[test]
     fn test_no_wrap_short_line() {
         let lines = make_lines(&["hello"]);
-        let wc = wrap_log_lines(&lines, 20, 10);
+        let wc = wrap_log_lines(&lines, 20, 10, 0);
         assert_eq!(wc.visual_lines.len(), 1);
         assert_eq!(wc.visual_lines[0].text, "hello");
         assert_eq!(wc.visual_lines[0].byte_start, 0);
@@ -332,7 +340,7 @@ mod tests {
     fn test_word_wrap_at_space() {
         // "hello world" with width 6 → "hello " (6) and "world" (5)
         let lines = make_lines(&["hello world"]);
-        let wc = wrap_log_lines(&lines, 6, 10);
+        let wc = wrap_log_lines(&lines, 6, 10, 0);
         assert_eq!(wc.visual_lines.len(), 2);
         assert_eq!(wc.visual_lines[0].text, "hello ");
         assert_eq!(wc.visual_lines[0].byte_start, 0);
@@ -346,7 +354,7 @@ mod tests {
     fn test_char_wrap_long_word() {
         // "abcdefgh" with width 3 → "abc", "def", "gh"
         let lines = make_lines(&["abcdefgh"]);
-        let wc = wrap_log_lines(&lines, 3, 10);
+        let wc = wrap_log_lines(&lines, 3, 10, 0);
         assert_eq!(wc.visual_lines.len(), 3);
         assert_eq!(wc.visual_lines[0].text, "abc");
         assert_eq!(wc.visual_lines[1].text, "def");
@@ -356,7 +364,7 @@ mod tests {
     #[test]
     fn test_empty_line() {
         let lines = make_lines(&[""]);
-        let wc = wrap_log_lines(&lines, 20, 10);
+        let wc = wrap_log_lines(&lines, 20, 10, 0);
         assert_eq!(wc.visual_lines.len(), 1);
         assert_eq!(wc.visual_lines[0].text, "");
         assert_eq!(wc.visual_lines[0].byte_start, 0);
@@ -366,7 +374,7 @@ mod tests {
     #[test]
     fn test_multiple_lines() {
         let lines = make_lines(&["aaa", "bbb"]);
-        let wc = wrap_log_lines(&lines, 20, 10);
+        let wc = wrap_log_lines(&lines, 20, 10, 0);
         assert_eq!(wc.visual_lines.len(), 2);
         assert_eq!(wc.visual_lines[0].logical_line_index, 0);
         assert_eq!(wc.visual_lines[0].text, "aaa");
@@ -377,7 +385,7 @@ mod tests {
     #[test]
     fn test_exact_width_line() {
         let lines = make_lines(&["abcde"]);
-        let wc = wrap_log_lines(&lines, 5, 10);
+        let wc = wrap_log_lines(&lines, 5, 10, 0);
         assert_eq!(wc.visual_lines.len(), 1);
         assert_eq!(wc.visual_lines[0].text, "abcde");
     }
@@ -386,7 +394,7 @@ mod tests {
     fn test_trailing_space_at_boundary() {
         // "abc " with width 4 → fits in one line (width 4)
         let lines = make_lines(&["abc "]);
-        let wc = wrap_log_lines(&lines, 4, 10);
+        let wc = wrap_log_lines(&lines, 4, 10, 0);
         assert_eq!(wc.visual_lines.len(), 1);
         assert_eq!(wc.visual_lines[0].text, "abc ");
     }
@@ -395,7 +403,7 @@ mod tests {
     fn test_cjk_double_width() {
         // Each CJK char is 2 columns. "あいう" = 6 columns. Width 5 → "あい"(4), "う"(2)
         let lines = make_lines(&["あいう"]);
-        let wc = wrap_log_lines(&lines, 5, 10);
+        let wc = wrap_log_lines(&lines, 5, 10, 0);
         assert_eq!(wc.visual_lines.len(), 2);
         assert_eq!(wc.visual_lines[0].text, "あい");
         assert_eq!(wc.visual_lines[1].text, "う");
@@ -406,7 +414,7 @@ mod tests {
         // Width 3: CJK char (width 2) + another CJK char would be 4 → wrap.
         // "あい" (4 cols) at width 3 → "あ"(2), "い"(2)
         let lines = make_lines(&["あい"]);
-        let wc = wrap_log_lines(&lines, 3, 10);
+        let wc = wrap_log_lines(&lines, 3, 10, 0);
         assert_eq!(wc.visual_lines.len(), 2);
         assert_eq!(wc.visual_lines[0].text, "あ");
         assert_eq!(wc.visual_lines[1].text, "い");
@@ -418,7 +426,7 @@ mod tests {
         // a=1, あ=2 → 1+2=3 fits in width 3. Then b=1 → total 4 > 3, wrap.
         // So: "aあ"(3), "b"(1)
         let lines = make_lines(&["aあb"]);
-        let wc = wrap_log_lines(&lines, 3, 10);
+        let wc = wrap_log_lines(&lines, 3, 10, 0);
         assert_eq!(wc.visual_lines.len(), 2);
         assert_eq!(wc.visual_lines[0].text, "aあ");
         assert_eq!(wc.visual_lines[1].text, "b");
@@ -427,7 +435,7 @@ mod tests {
     #[test]
     fn test_max_scroll_calculation() {
         let lines = make_lines(&["a", "b", "c", "d", "e"]);
-        let wc = wrap_log_lines(&lines, 20, 3);
+        let wc = wrap_log_lines(&lines, 20, 3, 0);
         // 5 visual lines, visible 3 → max_scroll = 2
         assert_eq!(wc.max_scroll, 2);
     }
@@ -435,14 +443,14 @@ mod tests {
     #[test]
     fn test_max_scroll_no_overflow() {
         let lines = make_lines(&["a", "b"]);
-        let wc = wrap_log_lines(&lines, 20, 10);
+        let wc = wrap_log_lines(&lines, 20, 10, 0);
         assert_eq!(wc.max_scroll, 0);
     }
 
     #[test]
     fn test_stderr_flag_preserved() {
         let lines = make_lines_with_stderr(&[("ok", false), ("err", true)]);
-        let wc = wrap_log_lines(&lines, 20, 10);
+        let wc = wrap_log_lines(&lines, 20, 10, 0);
         assert!(!wc.visual_lines[0].is_stderr);
         assert!(wc.visual_lines[1].is_stderr);
     }
@@ -454,7 +462,7 @@ mod tests {
     #[test]
     fn test_screen_to_text_first_line() {
         let lines = make_lines(&["hello world"]);
-        let wc = wrap_log_lines(&lines, 20, 10);
+        let wc = wrap_log_lines(&lines, 20, 10, 0);
         let pos = wc.screen_to_text(0, 5, 0).unwrap();
         assert_eq!(pos.visual_line_index, 0);
         assert_eq!(pos.byte_offset, 5);
@@ -463,7 +471,7 @@ mod tests {
     #[test]
     fn test_screen_to_text_with_scroll() {
         let lines = make_lines(&["aaa", "bbb", "ccc"]);
-        let wc = wrap_log_lines(&lines, 20, 2);
+        let wc = wrap_log_lines(&lines, 20, 2, 0);
         // Scroll offset 1, screen row 0 → visual line 1 ("bbb")
         let pos = wc.screen_to_text(0, 1, 1).unwrap();
         assert_eq!(pos.visual_line_index, 1);
@@ -473,7 +481,7 @@ mod tests {
     #[test]
     fn test_screen_to_text_beyond_content() {
         let lines = make_lines(&["abc"]);
-        let wc = wrap_log_lines(&lines, 20, 10);
+        let wc = wrap_log_lines(&lines, 20, 10, 0);
         // Screen row 5 is way beyond content → clamp to last line
         let pos = wc.screen_to_text(5, 0, 0).unwrap();
         assert_eq!(pos.visual_line_index, 0);
@@ -482,7 +490,7 @@ mod tests {
     #[test]
     fn test_screen_to_text_col_beyond_line_end() {
         let lines = make_lines(&["hi"]);
-        let wc = wrap_log_lines(&lines, 20, 10);
+        let wc = wrap_log_lines(&lines, 20, 10, 0);
         let pos = wc.screen_to_text(0, 100, 0).unwrap();
         assert_eq!(pos.visual_line_index, 0);
         assert_eq!(pos.byte_offset, 2); // clamped to end of "hi"
@@ -492,7 +500,7 @@ mod tests {
     fn test_screen_to_text_cjk_col() {
         // "あいう" — each char is 2 display columns
         let lines = make_lines(&["あいう"]);
-        let wc = wrap_log_lines(&lines, 20, 10);
+        let wc = wrap_log_lines(&lines, 20, 10, 0);
 
         // col 0 → byte 0 (start of あ)
         let pos = wc.screen_to_text(0, 0, 0).unwrap();
@@ -522,7 +530,7 @@ mod tests {
     #[test]
     fn test_screen_to_text_empty() {
         let lines: VecDeque<LogLine> = VecDeque::new();
-        let wc = wrap_log_lines(&lines, 20, 10);
+        let wc = wrap_log_lines(&lines, 20, 10, 0);
         assert!(wc.screen_to_text(0, 0, 0).is_none());
     }
 
@@ -533,7 +541,7 @@ mod tests {
     #[test]
     fn test_extract_single_line_partial() {
         let lines = make_lines(&["hello world"]);
-        let wc = wrap_log_lines(&lines, 20, 10);
+        let wc = wrap_log_lines(&lines, 20, 10, 0);
         let text = wc.extract_text(
             TextPosition { visual_line_index: 0, byte_offset: 0 },
             TextPosition { visual_line_index: 0, byte_offset: 5 },
@@ -544,7 +552,7 @@ mod tests {
     #[test]
     fn test_extract_multi_line() {
         let lines = make_lines(&["aaa", "bbb", "ccc"]);
-        let wc = wrap_log_lines(&lines, 20, 10);
+        let wc = wrap_log_lines(&lines, 20, 10, 0);
         let text = wc.extract_text(
             TextPosition { visual_line_index: 0, byte_offset: 1 },
             TextPosition { visual_line_index: 2, byte_offset: 2 },
@@ -558,7 +566,7 @@ mod tests {
         // "hello world" wrapped at width 6 → "hello " + "world"
         // These are the SAME logical line, so no \n separator
         let lines = make_lines(&["hello world"]);
-        let wc = wrap_log_lines(&lines, 6, 10);
+        let wc = wrap_log_lines(&lines, 6, 10, 0);
         assert_eq!(wc.visual_lines.len(), 2);
         let text = wc.extract_text(
             TextPosition { visual_line_index: 0, byte_offset: 3 },
@@ -571,7 +579,7 @@ mod tests {
     #[test]
     fn test_extract_across_logical_lines() {
         let lines = make_lines(&["aaa", "bbb"]);
-        let wc = wrap_log_lines(&lines, 20, 10);
+        let wc = wrap_log_lines(&lines, 20, 10, 0);
         let text = wc.extract_text(
             TextPosition { visual_line_index: 0, byte_offset: 0 },
             TextPosition { visual_line_index: 1, byte_offset: 3 },
@@ -582,7 +590,7 @@ mod tests {
     #[test]
     fn test_extract_empty_selection() {
         let lines = make_lines(&["hello"]);
-        let wc = wrap_log_lines(&lines, 20, 10);
+        let wc = wrap_log_lines(&lines, 20, 10, 0);
         let text = wc.extract_text(
             TextPosition { visual_line_index: 0, byte_offset: 2 },
             TextPosition { visual_line_index: 0, byte_offset: 2 },
@@ -597,7 +605,7 @@ mod tests {
     #[test]
     fn test_block_single_row() {
         let lines = make_lines(&["hello world"]);
-        let wc = wrap_log_lines(&lines, 20, 10);
+        let wc = wrap_log_lines(&lines, 20, 10, 0);
         let text = wc.extract_block_text(0, 0, 2, 7);
         assert_eq!(text, "llo w");
     }
@@ -605,7 +613,7 @@ mod tests {
     #[test]
     fn test_block_multi_row() {
         let lines = make_lines(&["abcdef", "123456", "xyzxyz"]);
-        let wc = wrap_log_lines(&lines, 20, 10);
+        let wc = wrap_log_lines(&lines, 20, 10, 0);
         let text = wc.extract_block_text(0, 2, 1, 4);
         assert_eq!(text, "bcd\n234\nyzx"); // cols 1..4 of "xyzxyz" = "yzx"
     }
@@ -613,7 +621,7 @@ mod tests {
     #[test]
     fn test_block_col_beyond_line() {
         let lines = make_lines(&["ab", "cdefgh"]);
-        let wc = wrap_log_lines(&lines, 20, 10);
+        let wc = wrap_log_lines(&lines, 20, 10, 0);
         // cols 1..5: "ab" only has 2 chars, so we get "b" from first line
         let text = wc.extract_block_text(0, 1, 1, 5);
         assert_eq!(text, "b\ndefg");
@@ -623,7 +631,7 @@ mod tests {
     fn test_block_cjk_column() {
         // "あいう" — cols: あ=0-1, い=2-3, う=4-5
         let lines = make_lines(&["あいう"]);
-        let wc = wrap_log_lines(&lines, 20, 10);
+        let wc = wrap_log_lines(&lines, 20, 10, 0);
         // Block select cols 2..4 → should get "い"
         let text = wc.extract_block_text(0, 0, 2, 4);
         assert_eq!(text, "い");
