@@ -23,10 +23,37 @@ pub fn render_log_view(
     // inner_width: borders (2) + scrollbar track (1)
     let inner_width = area.width.saturating_sub(3).max(1) as usize;
 
-    // Pre-compute visual lines.
-    let wrapped = wrap_log_lines(log_buffer.lines(), inner_width, visible_height);
+    // Reuse cached wrapped content if log buffer and width haven't changed.
+    let generation = log_buffer.generation();
+    let mut cached = wrapped_content_out.borrow_mut().take();
+    let is_cache_valid = cached.as_ref().is_some_and(|wc| {
+        wc.cache_generation == generation && wc.cache_width == inner_width
+    });
+    let wrapped = if is_cache_valid {
+        let mut wc = cached.take().unwrap();
+        wc.max_scroll = wc.visual_lines.len().saturating_sub(visible_height);
+        wc
+    } else {
+        wrap_log_lines(log_buffer.lines(), inner_width, visible_height, generation)
+    };
     let max_scroll = wrapped.max_scroll;
     max_scroll_out.set(max_scroll);
+
+    // Empty log hint
+    if wrapped.visual_lines.is_empty() {
+        let block = Block::default()
+            .title(format!(" Logs: [{}] ", task_name))
+            .borders(Borders::ALL);
+        let hint = Paragraph::new(Line::from(Span::styled(
+            "No output yet",
+            Style::default().fg(Color::DarkGray),
+        )))
+        .block(block)
+        .alignment(ratatui::layout::Alignment::Center);
+        frame.render_widget(hint, area);
+        *wrapped_content_out.borrow_mut() = Some(wrapped);
+        return;
+    }
 
     let effective_scroll = scroll_offset.min(max_scroll);
 

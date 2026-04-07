@@ -83,6 +83,8 @@ pub struct AppState {
     pub should_quit: bool,
     pub confirm_quit: bool,
     pub auto_scroll: bool,
+    /// Per-task scroll position: (scroll_offset, auto_scroll).
+    pub task_scroll_positions: HashMap<usize, (usize, bool)>,
     /// Updated by `render_log_view` each frame via interior mutability,
     /// so scroll logic can compare against the true visual-line max.
     pub last_max_scroll: Cell<usize>,
@@ -141,6 +143,7 @@ impl App {
                 should_quit: false,
                 confirm_quit: false,
                 auto_scroll: true,
+                task_scroll_positions: HashMap::new(),
                 last_max_scroll: Cell::new(0),
                 update_info: None,
                 last_task_list_area: Cell::new(Rect::default()),
@@ -910,9 +913,21 @@ impl App {
 
     fn select_task(&mut self, index: usize) {
         if index < self.state.tasks.len() && index != self.state.selected_index {
+            // Save current task's scroll position
+            self.state.task_scroll_positions.insert(
+                self.state.selected_index,
+                (self.state.log_scroll_offset, self.state.auto_scroll),
+            );
             self.state.selection.clear();
             self.state.selected_index = index;
-            self.reset_scroll();
+            *self.state.last_wrapped_content.borrow_mut() = None;
+            // Restore scroll position for the new task, or default to bottom
+            if let Some(&(offset, auto)) = self.state.task_scroll_positions.get(&index) {
+                self.state.log_scroll_offset = offset;
+                self.state.auto_scroll = auto;
+            } else {
+                self.reset_scroll();
+            }
             self.refresh_search();
         }
     }
