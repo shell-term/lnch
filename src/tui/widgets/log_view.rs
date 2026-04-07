@@ -39,6 +39,22 @@ pub fn render_log_view(
     let max_scroll = wrapped.max_scroll;
     max_scroll_out.set(max_scroll);
 
+    // Empty log hint
+    if wrapped.visual_lines.is_empty() {
+        let block = Block::default()
+            .title(format!(" Logs: [{}] ", task_name))
+            .borders(Borders::ALL);
+        let hint = Paragraph::new(Line::from(Span::styled(
+            "No output yet",
+            Style::default().fg(Color::DarkGray),
+        )))
+        .block(block)
+        .alignment(ratatui::layout::Alignment::Center);
+        frame.render_widget(hint, area);
+        *wrapped_content_out.borrow_mut() = Some(wrapped);
+        return;
+    }
+
     let effective_scroll = scroll_offset.min(max_scroll);
 
     // Scroll position indicator
