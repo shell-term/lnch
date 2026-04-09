@@ -336,6 +336,9 @@ impl App {
             KeyCode::Char('a') => {
                 let _ = self.process_cmd_tx.send(ProcessCommand::StartAll).await;
             }
+            KeyCode::Char('A') => {
+                let _ = self.process_cmd_tx.send(ProcessCommand::StopAll).await;
+            }
             KeyCode::Char('s') => {
                 let name = self.selected_task_name();
                 let cmd = if self.is_selected_task_running() {
