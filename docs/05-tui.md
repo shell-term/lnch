@@ -16,7 +16,7 @@
 │                     │                                               │
 │                     │                                               │
 ├─────────────────────┴───────────────────────────────────────────────┤
-│ [a] All Start  [s] Start/Stop  [r] Restart  [↑↓] Select  [/] Search  [c] Clear  [q] Quit │
+│ [a/A] Start/Stop All  [s] Start/Stop  [r] Restart  [↑↓] Select  [/] Search  [c] Clear  [q] Quit │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -117,7 +117,7 @@ vim/less ライクなインクリメンタル検索機能。
 キーバインドのヘルプを常時表示。新バージョンが検出された場合は `[u] Update` が追加される:
 
 ```
-[a] All Start  [s] Start/Stop  [r] Restart  [↑↓] Select  [/] Search  [c] Clear  [u] Update  [q] Quit
+[a/A] Start/Stop All  [s] Start/Stop  [r] Restart  [↑↓] Select  [/] Search  [c] Clear  [u] Update  [q] Quit
 ```
 
 ### アップデート通知
@@ -138,6 +138,7 @@ vim/less ライクなインクリメンタル検索機能。
 | `q` | アプリケーション終了 | 常時 |
 | `Ctrl+C` | アプリケーション終了 | 常時 |
 | `a` | 全タスク起動 | 常時 |
+| `A` | 全タスク停止 | 常時 |
 | `s` | 選択タスクの起動/停止トグル | 常時 |
 | `r` | 選択タスクの再起動 | 常時 |
 | `↑` / `k` | 前のタスクを選択 | 常時 |

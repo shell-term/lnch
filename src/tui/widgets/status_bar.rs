@@ -20,8 +20,8 @@ pub fn render_status_bar(frame: &mut Frame, area: Rect, update_available: bool, 
     }
 
     let mut spans = vec![
-        Span::styled("[a]", Style::default().fg(Color::Yellow).bold()),
-        Span::raw(" All Start  "),
+        Span::styled("[a/A]", Style::default().fg(Color::Yellow).bold()),
+        Span::raw(" Start/Stop All  "),
         Span::styled("[s]", Style::default().fg(Color::Yellow).bold()),
         Span::raw(" Start/Stop  "),
         Span::styled("[r]", Style::default().fg(Color::Yellow).bold()),
